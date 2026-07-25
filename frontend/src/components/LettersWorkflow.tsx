@@ -180,9 +180,9 @@ export default function LettersWorkflow({ user, onRefreshStats }: LettersWorkflo
   );
 
   return (
-    <div className="h-[calc(100vh-6.5rem)] flex apple-card overflow-hidden select-none">
+    <div className="h-[calc(100vh-6.5rem)] flex flex-col md:flex-row apple-card overflow-hidden select-none">
       {/* Sidebar List */}
-      <div className="w-80 border-r border-border/60 flex flex-col bg-secondary/30">
+      <div className="w-full md:w-80 h-48 md:h-auto border-r border-border/60 flex flex-col bg-secondary/30 shrink-0">
         <div className="p-3.5 border-b border-border/40 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold tracking-tight">Correspondence</h2>

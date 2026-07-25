@@ -570,7 +570,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
                 {files.length > 0 && (
                   <div>
                     <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3 px-1">Files</h3>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                       {files.map((file) => (
                         <div
                           key={file.id}

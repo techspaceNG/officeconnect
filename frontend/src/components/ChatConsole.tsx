@@ -206,9 +206,9 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
   );
 
   return (
-    <div className="h-[calc(100vh-6.5rem)] flex apple-card overflow-hidden select-none">
-      {/* Messages Left Sidebar (iMessage style) */}
-      <div className="w-72 border-r border-border/60 flex flex-col bg-secondary/30">
+    <div className="h-[calc(100vh-6.5rem)] flex flex-col md:flex-row apple-card overflow-hidden select-none">
+      {/* Left Sidebar Pane */}
+      <div className="w-full md:w-80 h-48 md:h-auto border-r border-border/60 flex flex-col bg-secondary/30 shrink-0">
         {/* Sidebar Header */}
         <div className="p-3.5 border-b border-border/40 space-y-3">
           <div className="flex items-center justify-between">

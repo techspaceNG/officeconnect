@@ -50,6 +50,9 @@ export default function Home() {
   const [pendingLetters, setPendingLetters] = useState<any[]>([]);
   const [recentFiles, setRecentFiles] = useState<any[]>([]);
 
+  // Mobile drawer state
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any>(null);
@@ -104,7 +107,7 @@ export default function Home() {
       const data = await apiRequest('/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: usernameInput, password: passwordInput }),
+        body: JSON.stringify({ username: usernameInput.trim(), password: passwordInput }),
       });
 
       localStorage.setItem('token', data.access_token);
@@ -113,8 +116,8 @@ export default function Home() {
       
       connectSocket();
       fetchDashboardData(data.user);
-    } catch (err) {
-      setLoginError(err.message || 'Login failed');
+    } catch (e: any) {
+      setLoginError(e.message || 'Invalid credentials');
     } finally {
       setLoading(false);
     }
@@ -295,9 +298,21 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex bg-background text-foreground font-sans select-none overflow-hidden">
-      {/* macOS Sidebar Navigation */}
-      <aside className="w-64 glass-panel border-r border-border/60 flex flex-col shrink-0 relative z-20">
+    <div className="min-h-screen flex bg-background text-foreground font-sans select-none overflow-hidden relative">
+      {/* Mobile Overlay Backdrop */}
+      {isMobileMenuOpen && (
+        <div
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="fixed inset-0 bg-background/80 backdrop-blur-xs z-40 md:hidden"
+        ></div>
+      )}
+
+      {/* macOS Sidebar Navigation (Responsive Drawer on Mobile) */}
+      <aside
+        className={`fixed md:static inset-y-0 left-0 w-64 glass-panel border-r border-border/60 flex flex-col shrink-0 z-50 transform transition-transform duration-300 md:transform-none ${
+          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+      >
         {/* macOS Traffic Lights Header */}
         <div className="p-4 border-b border-border/40 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -314,7 +329,7 @@ export default function Home() {
         {/* Navigation links */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           <button
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
               activeTab === 'dashboard'
                 ? 'bg-primary text-white font-semibold shadow-sm'
@@ -326,7 +341,7 @@ export default function Home() {
           </button>
 
           <button
-            onClick={() => setActiveTab('files')}
+            onClick={() => { setActiveTab('files'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
               activeTab === 'files'
                 ? 'bg-primary text-white font-semibold shadow-sm'
@@ -338,7 +353,7 @@ export default function Home() {
           </button>
 
           <button
-            onClick={() => setActiveTab('chat')}
+            onClick={() => { setActiveTab('chat'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
               activeTab === 'chat'
                 ? 'bg-primary text-white font-semibold shadow-sm'
@@ -350,7 +365,7 @@ export default function Home() {
           </button>
 
           <button
-            onClick={() => setActiveTab('notes')}
+            onClick={() => { setActiveTab('notes'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
               activeTab === 'notes'
                 ? 'bg-primary text-white font-semibold shadow-sm'
@@ -362,7 +377,7 @@ export default function Home() {
           </button>
 
           <button
-            onClick={() => setActiveTab('letters')}
+            onClick={() => { setActiveTab('letters'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
               activeTab === 'letters'
                 ? 'bg-primary text-white font-semibold shadow-sm'
@@ -380,7 +395,7 @@ export default function Home() {
               </div>
 
               <button
-                onClick={() => setActiveTab('logs')}
+                onClick={() => { setActiveTab('logs'); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
                   activeTab === 'logs'
                     ? 'bg-primary text-white font-semibold shadow-sm'
@@ -392,7 +407,7 @@ export default function Home() {
               </button>
 
               <button
-                onClick={() => setActiveTab('settings')}
+                onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
                   activeTab === 'settings'
                     ? 'bg-primary text-white font-semibold shadow-sm'
@@ -432,28 +447,38 @@ export default function Home() {
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 bg-background relative">
         {/* Global Header Bar */}
-        <header className="h-14 border-b border-border/40 flex items-center justify-between px-6 bg-background/80 backdrop-blur-md sticky top-0 z-10">
-          {/* Apple Pill Search Bar */}
-          <div className="w-80 relative">
-            <Search className="absolute left-3.5 top-2.5 text-muted-foreground" size={14} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search documents, chat or notes..."
-              className="apple-input w-full pl-9 pr-8 py-1.5 text-xs rounded-full"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-2 text-muted-foreground hover:text-foreground"
-              >
-                <X size={14} />
-              </button>
-            )}
+        <header className="h-14 border-b border-border/40 flex items-center justify-between px-4 sm:px-6 bg-background/80 backdrop-blur-md sticky top-0 z-10 gap-2">
+          <div className="flex items-center gap-2 flex-1 max-w-md">
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="md:hidden p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary transition-all"
+              title="Toggle Menu"
+            >
+              <Menu size={18} />
+            </button>
+
+            {/* Apple Pill Search Bar */}
+            <div className="flex-1 relative">
+              <Search className="absolute left-3.5 top-2.5 text-muted-foreground" size={14} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="apple-input w-full pl-9 pr-8 py-1.5 text-xs rounded-full"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-2 text-muted-foreground hover:text-foreground"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={toggleTheme}
               className="p-1.5 rounded-full border border-border/60 hover:bg-secondary text-muted-foreground hover:text-foreground transition-all cursor-pointer"
@@ -462,9 +487,10 @@ export default function Home() {
               {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
             </button>
 
-            <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+            <div className="px-2.5 sm:px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center gap-1.5 text-[10px] sm:text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold shrink-0">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              LAN Connected
+              <span className="hidden sm:inline">LAN Connected</span>
+              <span className="sm:hidden">LAN</span>
             </div>
           </div>
         </header>

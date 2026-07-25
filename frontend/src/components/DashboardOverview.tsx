@@ -82,7 +82,7 @@ export default function DashboardOverview({
       )}
 
       {/* Quick Action Stats grid */}
-      <div className="grid gap-5 md:grid-cols-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         {/* Storage Stats */}
         <div className="apple-card p-5 flex flex-col justify-between">
           <div className="flex items-center justify-between">
