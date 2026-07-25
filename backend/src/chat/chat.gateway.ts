@@ -62,6 +62,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('getOnlineUsers')
+  handleGetOnlineUsers(@ConnectedSocket() client: Socket) {
+    const onlineIds = Array.from(this.activeUsers.keys());
+    client.emit('onlineUsersList', onlineIds);
+  }
+
   @SubscribeMessage('joinChannel')
   handleJoinChannel(@ConnectedSocket() client: Socket, @MessageBody('channelId') channelId: number) {
     const roomName = `channel_${channelId}`;

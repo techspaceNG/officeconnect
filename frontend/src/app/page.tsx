@@ -52,7 +52,34 @@ export default function Home() {
   const [pendingLetters, setPendingLetters] = useState<any[]>([]);
   const [recentFiles, setRecentFiles] = useState<any[]>([]);
 
-  // Real-time Toast Notification State
+  // Real-time Toast & Notification Center State
+  const [notifications, setNotifications] = useState<any[]>([
+    {
+      id: '1',
+      title: 'Welcome to OfficeConnect',
+      message: 'System ready for FCET Bichi ICT Department operations.',
+      isRead: false,
+      createdAt: 'Just now',
+      type: 'system',
+    },
+  ]);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'unread'>('all');
+
+  const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  const markAllAsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  };
+
+  const markNotificationAsRead = (id: string, targetTab?: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+    );
+    if (targetTab) setActiveTab(targetTab);
+    setShowNotificationCenter(false);
+  };
+
   const [toastNotification, setToastNotification] = useState<{
     title: string;
     message: string;
@@ -203,23 +230,57 @@ export default function Home() {
     const handleNotification = (data: any) => {
       fetchDashboardData(user);
       if (data?.message && data.message.senderId !== user.id) {
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const senderName = data.message.sender?.fullName || 'Colleague';
+        const msgContent = data.message.content || 'Sent an attachment';
+
         setToastNotification({
-          title: `New Message from ${data.message.sender?.fullName || 'Colleague'}`,
-          message: data.message.content || 'Sent an attachment',
+          title: `New Message from ${senderName}`,
+          message: msgContent,
           type: 'chat',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          time: timeStr,
         });
+
+        setNotifications((prev) => [
+          {
+            id: Date.now().toString(),
+            title: `Message from ${senderName}`,
+            message: msgContent,
+            isRead: false,
+            createdAt: timeStr,
+            type: 'chat',
+            targetTab: 'chat',
+          },
+          ...prev,
+        ]);
       }
     };
 
     const handleFileShared = (data: any) => {
       if (data?.sharedWithId === user.id) {
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const senderName = data.senderName || 'A colleague';
+        const fileName = data.fileName || 'a document';
+
         setToastNotification({
           title: 'New File Shared',
-          message: `${data.senderName || 'A colleague'} shared "${data.fileName || 'a document'}" with you.`,
+          message: `${senderName} shared "${fileName}" with you.`,
           type: 'file',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          time: timeStr,
         });
+
+        setNotifications((prev) => [
+          {
+            id: Date.now().toString(),
+            title: 'New File Shared',
+            message: `${senderName} shared "${fileName}" with you.`,
+            isRead: false,
+            createdAt: timeStr,
+            type: 'file',
+            targetTab: 'files',
+          },
+          ...prev,
+        ]);
         fetchDashboardData(user);
       }
     };
@@ -519,7 +580,109 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 relative">
+            {/* Notification Bell Button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowNotificationCenter(!showNotificationCenter)}
+                className="p-1.5 rounded-full border border-border/60 hover:bg-secondary text-muted-foreground hover:text-foreground transition-all cursor-pointer relative"
+                title="Notifications"
+              >
+                <Bell size={15} />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-destructive text-white text-[9px] font-bold h-4 min-w-4 px-1 rounded-full flex items-center justify-center border-2 border-background animate-pulse">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Popover Dropdown (Scalable & Responsive) */}
+              {showNotificationCenter && (
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 apple-card p-4 shadow-2xl border border-border/80 bg-background/95 backdrop-blur-2xl z-50 rounded-2xl animate-in zoom-in-95 duration-200">
+                  <div className="flex items-center justify-between pb-3 border-b border-border/40">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-bold">Notifications</h3>
+                      {unreadCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-bold">
+                          {unreadCount} new
+                        </span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={markAllAsRead}
+                        className="text-[10px] font-semibold text-primary hover:underline cursor-pointer"
+                      >
+                        Mark all as read
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Tabs */}
+                  <div className="flex gap-2 my-2">
+                    <button
+                      onClick={() => setNotificationFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                        notificationFilter === 'all'
+                          ? 'bg-primary text-white'
+                          : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      All ({notifications.length})
+                    </button>
+                    <button
+                      onClick={() => setNotificationFilter('unread')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                        notificationFilter === 'unread'
+                          ? 'bg-primary text-white'
+                          : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Unread ({unreadCount})
+                    </button>
+                  </div>
+
+                  {/* Notifications List */}
+                  <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                    {(notificationFilter === 'all'
+                      ? notifications
+                      : notifications.filter((n) => !n.isRead)
+                    ).length === 0 ? (
+                      <div className="py-8 text-center text-xs text-muted-foreground">
+                        No {notificationFilter === 'unread' ? 'unread' : ''} notifications
+                      </div>
+                    ) : (
+                      (notificationFilter === 'all'
+                        ? notifications
+                        : notifications.filter((n) => !n.isRead)
+                      ).map((notif) => (
+                        <div
+                          key={notif.id}
+                          onClick={() => markNotificationAsRead(notif.id, notif.targetTab)}
+                          className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-start gap-2.5 ${
+                            !notif.isRead
+                              ? 'bg-primary/5 border-primary/20'
+                              : 'bg-secondary/30 border-transparent hover:bg-secondary'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                            !notif.isRead ? 'bg-primary animate-pulse' : 'bg-transparent'
+                          }`}></span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-semibold truncate">{notif.title}</h4>
+                              <span className="text-[9px] text-muted-foreground shrink-0">{notif.createdAt}</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{notif.message}</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={toggleTheme}
               className="p-1.5 rounded-full border border-border/60 hover:bg-secondary text-muted-foreground hover:text-foreground transition-all cursor-pointer"

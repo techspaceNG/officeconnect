@@ -39,6 +39,9 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
 
+  // Real-time Online Users State
+  const [onlineUserIds, setOnlineUserIds] = useState<number[]>([]);
+
   // --- WebRTC & Audio/Video Call State ---
   const [isInCall, setIsInCall] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video'>('video');
@@ -162,6 +165,22 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
       cleanUpCall();
     };
 
+    socket.emit('getOnlineUsers');
+
+    const handleOnlineUsersList = (ids: number[]) => {
+      setOnlineUserIds(ids);
+    };
+
+    const handleUserStatus = (data: { userId: number; status: string }) => {
+      if (data.status === 'online') {
+        setOnlineUserIds((prev) => Array.from(new Set([...prev, data.userId])));
+      } else {
+        setOnlineUserIds((prev) => prev.filter((id) => id !== data.userId));
+      }
+    };
+
+    socket.on('onlineUsersList', handleOnlineUsersList);
+    socket.on('userStatus', handleUserStatus);
     socket.on('message', handleNewMessage);
     socket.on('typing', handleTyping);
     socket.on('incomingCall', handleIncomingCall);
@@ -171,6 +190,8 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
     socket.on('callRejected', handleCallRejected);
 
     return () => {
+      socket.off('onlineUsersList', handleOnlineUsersList);
+      socket.off('userStatus', handleUserStatus);
       socket.off('message', handleNewMessage);
       socket.off('typing', handleTyping);
       socket.off('incomingCall', handleIncomingCall);
@@ -501,6 +522,8 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
             const isActive = activeChannel?.id === chan.id;
             const displayName = getChannelDisplayName(chan);
             const lastMsg = chan.messages?.[0];
+            const partner = chan.members?.find((m: any) => (m.id || m.user?.id) !== user.id);
+            const isPartnerOnline = partner && onlineUserIds.includes(partner.id || partner.user?.id);
 
             return (
               <div
@@ -512,10 +535,17 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
                     : 'hover:bg-secondary/80 text-foreground'
                 }`}
               >
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
-                }`}>
-                  {chan.isGroup ? <Hash size={14} /> : <User size={14} />}
+                <div className="relative shrink-0">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${
+                    isActive ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                  }`}>
+                    {chan.isGroup ? <Hash size={14} /> : <User size={14} />}
+                  </div>
+                  {!chan.isGroup && (
+                    <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-background ${
+                      isPartnerOnline ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                    }`} title={isPartnerOnline ? 'Online' : 'Offline'}></span>
+                  )}
                 </div>
 
                 <div className="truncate flex-1 min-w-0">
@@ -543,19 +573,38 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
           <>
             {/* Conversation Header */}
             <div className="px-5 py-3 border-b border-border/40 flex items-center justify-between bg-background/80 backdrop-blur-md">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
-                  {activeChannel.isGroup ? <Hash size={14} /> : <User size={14} />}
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold">{getChannelDisplayName(activeChannel)}</h3>
-                  <p className="text-[10px] text-muted-foreground font-medium">
-                    {activeChannel.isGroup
-                      ? `${activeChannel.members?.length || 0} Members (Group Room)`
-                      : 'Direct Message'}
-                  </p>
-                </div>
-              </div>
+              {(() => {
+                const partner = activeChannel.members?.find((m: any) => (m.id || m.user?.id) !== user.id);
+                const isPartnerOnline = partner && onlineUserIds.includes(partner.id || partner.user?.id);
+
+                return (
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
+                        {activeChannel.isGroup ? <Hash size={14} /> : <User size={14} />}
+                      </div>
+                      {!activeChannel.isGroup && (
+                        <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-background ${
+                          isPartnerOnline ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                        }`}></span>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold">{getChannelDisplayName(activeChannel)}</h3>
+                      <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                        {activeChannel.isGroup ? (
+                          `${activeChannel.members?.length || 0} Members (Group Room)`
+                        ) : (
+                          <>
+                            <span className={`w-1.5 h-1.5 rounded-full ${isPartnerOnline ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/40'}`}></span>
+                            {isPartnerOnline ? 'Online' : 'Offline'}
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* WebRTC Audio & Video Calling Action Buttons */}
               <div className="flex items-center gap-1.5">
