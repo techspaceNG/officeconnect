@@ -17,6 +17,7 @@ import {
   Sparkles,
   Sun,
   Moon,
+  Menu,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
