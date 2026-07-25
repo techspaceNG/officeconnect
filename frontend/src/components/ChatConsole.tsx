@@ -18,6 +18,7 @@ import {
   FileText,
   X,
   Check,
+  ArrowLeft,
 } from 'lucide-react';
 import { apiRequest, apiDownloadBlob, getApiUrl } from '../lib/api';
 import { getSocket } from '../lib/socket';
@@ -38,6 +39,9 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
   const [newChannelIsGroup, setNewChannelIsGroup] = useState(true);
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
+
+  // Mobile view toggle state
+  const [showMobileChat, setShowMobileChat] = useState(false);
 
   // Real-time Online Users State
   const [onlineUserIds, setOnlineUserIds] = useState<number[]>([]);
@@ -96,6 +100,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
       socket.emit('leaveChannel', { channelId: activeChannel.id });
     }
     setActiveChannel(channel);
+    setShowMobileChat(true);
     socket.emit('joinChannel', { channelId: channel.id });
 
     try {
@@ -206,15 +211,46 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // --- WebRTC Logic ---
+  // --- WebRTC Safe getUserMedia helper ---
+  const getUserMediaStream = async (type: 'audio' | 'video'): Promise<MediaStream> => {
+    if (
+      typeof window === 'undefined' ||
+      (!navigator.mediaDevices &&
+        !(navigator as any).getUserMedia &&
+        !(navigator as any).webkitGetUserMedia &&
+        !(navigator as any).mozGetUserMedia)
+    ) {
+      throw new Error(
+        'WebRTC Audio/Video calls require HTTPS when accessed over LAN IP address (e.g. https://192.168.1.50). Browsers restrict camera/mic access over HTTP on non-localhost IPs. Please configure SSL/HTTPS on your server or test on localhost.'
+      );
+    }
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      return navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: type === 'video',
+      });
+    }
+
+    const legacyGetUserMedia =
+      (navigator as any).getUserMedia ||
+      (navigator as any).webkitGetUserMedia ||
+      (navigator as any).mozGetUserMedia;
+
+    return new Promise<MediaStream>((resolve, reject) => {
+      legacyGetUserMedia.call(
+        navigator,
+        { audio: true, video: type === 'video' },
+        resolve,
+        reject
+      );
+    });
+  };
 
   const startCall = async (type: 'audio' | 'video') => {
     if (!activeChannel) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === 'video',
-      });
+      const stream = await getUserMediaStream(type);
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
@@ -261,10 +297,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
     if (!incomingCall) return;
     try {
       const type = incomingCall.callType;
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === 'video',
-      });
+      const stream = await getUserMediaStream(type);
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
@@ -488,9 +521,11 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
   );
 
   return (
-    <div className="h-[calc(100vh-6.5rem)] flex flex-col md:flex-row apple-card overflow-hidden select-none relative">
-      {/* Left Sidebar Pane */}
-      <div className="w-full md:w-80 h-48 md:h-auto border-r border-border/60 flex flex-col bg-secondary/30 shrink-0">
+    <div className="h-[calc(100vh-6.5rem)] flex apple-card overflow-hidden select-none relative">
+      {/* Left Sidebar Pane (Discussions List) - Mobile Toggleable */}
+      <div className={`w-full md:w-80 border-r border-border/60 flex flex-col bg-secondary/30 shrink-0 ${
+        showMobileChat ? 'hidden md:flex' : 'flex'
+      }`}>
         {/* Sidebar Header */}
         <div className="p-3.5 border-b border-border/40 space-y-3">
           <div className="flex items-center justify-between">
@@ -567,47 +602,60 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
         </div>
       </div>
 
-      {/* Main Conversation Window */}
-      <div className="flex-1 flex flex-col bg-background relative">
+      {/* Main Conversation Window - Mobile Toggleable */}
+      <div className={`flex-1 flex flex-col bg-background relative ${
+        !showMobileChat ? 'hidden md:flex' : 'flex'
+      }`}>
         {activeChannel ? (
           <>
             {/* Conversation Header */}
-            <div className="px-5 py-3 border-b border-border/40 flex items-center justify-between bg-background/80 backdrop-blur-md">
-              {(() => {
-                const partner = activeChannel.members?.find((m: any) => (m.id || m.user?.id) !== user.id);
-                const isPartnerOnline = partner && onlineUserIds.includes(partner.id || partner.user?.id);
+            <div className="px-4 sm:px-5 py-3 border-b border-border/40 flex items-center justify-between bg-background/80 backdrop-blur-md">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <button
+                  onClick={() => setShowMobileChat(false)}
+                  className="md:hidden p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs font-semibold"
+                  title="Back to chats"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Back</span>
+                </button>
 
-                return (
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
-                        {activeChannel.isGroup ? <Hash size={14} /> : <User size={14} />}
-                      </div>
-                      {!activeChannel.isGroup && (
-                        <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-background ${
-                          isPartnerOnline ? 'bg-emerald-500' : 'bg-muted-foreground/40'
-                        }`}></span>
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-bold">{getChannelDisplayName(activeChannel)}</h3>
-                      <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
-                        {activeChannel.isGroup ? (
-                          `${activeChannel.members?.length || 0} Members (Group Room)`
-                        ) : (
-                          <>
-                            <span className={`w-1.5 h-1.5 rounded-full ${isPartnerOnline ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/40'}`}></span>
-                            {isPartnerOnline ? 'Online' : 'Offline'}
-                          </>
+                {(() => {
+                  const partner = activeChannel.members?.find((m: any) => (m.id || m.user?.id) !== user.id);
+                  const isPartnerOnline = partner && onlineUserIds.includes(partner.id || partner.user?.id);
+
+                  return (
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
+                          {activeChannel.isGroup ? <Hash size={14} /> : <User size={14} />}
+                        </div>
+                        {!activeChannel.isGroup && (
+                          <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-background ${
+                            isPartnerOnline ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                          }`}></span>
                         )}
-                      </p>
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-bold">{getChannelDisplayName(activeChannel)}</h3>
+                        <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                          {activeChannel.isGroup ? (
+                            `${activeChannel.members?.length || 0} Members (Group Room)`
+                          ) : (
+                            <>
+                              <span className={`w-1.5 h-1.5 rounded-full ${isPartnerOnline ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/40'}`}></span>
+                              {isPartnerOnline ? 'Online' : 'Offline'}
+                            </>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                );
-              })()}
+                  );
+                })()}
+              </div>
 
               {/* WebRTC Audio & Video Calling Action Buttons */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 sm:gap-1.5">
                 <button
                   onClick={() => startCall('audio')}
                   className="p-2 rounded-full hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-all cursor-pointer"
@@ -626,7 +674,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
             </div>
 
             {/* Messages Area */}
-            <div className="flex-1 p-5 overflow-y-auto space-y-4">
+            <div className="flex-1 p-4 sm:p-5 overflow-y-auto space-y-4">
               {messages.map((msg) => {
                 const isMe = msg.senderId === user.id;
 
@@ -724,12 +772,12 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
                 className="apple-button px-4 py-2 text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 <Send size={14} />
-                Send
+                <span className="hidden sm:inline">Send</span>
               </button>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-6 text-center">
             <MessageSquare size={48} className="stroke-[1.2] opacity-40 mb-2" />
             <p className="text-xs font-semibold">Select a discussion or meeting room to start</p>
           </div>
@@ -814,7 +862,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
 
               {/* Local Video Stream (Picture in Picture) */}
               {callType === 'video' && (
-                <div className="absolute bottom-6 right-6 w-48 h-36 rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl bg-zinc-800">
+                <div className="absolute bottom-6 right-6 w-36 sm:w-48 h-28 sm:h-36 rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl bg-zinc-800">
                   <video
                     ref={localVideoRef}
                     autoPlay
@@ -833,7 +881,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
 
             {/* Meeting Minutes Drawer Side Panel */}
             {showMeetingNotes && (
-              <div className="w-80 border-l border-white/10 bg-zinc-900/90 backdrop-blur-xl p-4 flex flex-col space-y-3 z-10 text-white">
+              <div className="w-full sm:w-80 absolute sm:relative inset-0 sm:inset-auto border-l border-white/10 bg-zinc-900/95 backdrop-blur-xl p-4 flex flex-col space-y-3 z-10 text-white">
                 <div className="flex items-center justify-between border-b border-white/10 pb-2">
                   <h4 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
                     <FileText size={14} />
