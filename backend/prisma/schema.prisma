@@ -1,0 +1,175 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  SUPER_ADMIN
+  DIRECTOR
+  STAFF
+}
+
+enum LetterStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id              Int              @id @default(autoincrement())
+  username        String           @unique
+  password        String
+  fullName        String
+  role            Role             @default(STAFF)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  active          Boolean          @default(true)
+  
+  files           File[]           @relation("UserFiles")
+  sharedFiles     File[]           @relation("SharedFiles")
+  folders         FileFolder[]     @relation("UserFolders")
+  sentLetters     OfficialLetter[] @relation("Creator")
+  approvedLetters OfficialLetter[] @relation("Approver")
+  logs            ActivityLog[]
+  notes           Note[]
+  messages        Message[]        @relation("MessageSender")
+  channels        Channel[]        @relation("ChannelMembers")
+  readReceipts    ReadReceipt[]
+}
+
+model FileFolder {
+  id           Int          @id @default(autoincrement())
+  name         String
+  parentId     Int?
+  parent       FileFolder?  @relation("SubFolders", fields: [parentId], references: [id], onDelete: Cascade)
+  subFolders   FileFolder[] @relation("SubFolders")
+  files        File[]
+  createdById  Int
+  createdBy    User         @relation("UserFolders", fields: [createdById], references: [id])
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  isRecycled   Boolean      @default(false)
+  deletedAt    DateTime?
+}
+
+model File {
+  id           Int           @id @default(autoincrement())
+  name         String
+  extension    String
+  mimeType     String
+  size         Int
+  path         String
+  folderId     Int?
+  folder       FileFolder?   @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  createdById  Int
+  createdBy    User          @relation("UserFiles", fields: [createdById], references: [id])
+  sharedWithId Int?
+  sharedWith   User?         @relation("SharedFiles", fields: [sharedWithId], references: [id])
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  isRecycled   Boolean       @default(false)
+  deletedAt    DateTime?
+  versions     FileVersion[]
+}
+
+model FileVersion {
+  id          Int      @id @default(autoincrement())
+  fileId      Int
+  file        File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  version     Int
+  path        String
+  size        Int
+  createdById Int
+  createdAt   DateTime @default(now())
+}
+
+model Channel {
+  id        Int       @id @default(autoincrement())
+  name      String
+  isGroup   Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  members   User[]    @relation("ChannelMembers")
+  messages  Message[]
+}
+
+model Message {
+  id           Int           @id @default(autoincrement())
+  content      String?
+  channelId    Int
+  channel      Channel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  senderId     Int
+  sender       User          @relation("MessageSender", fields: [senderId], references: [id])
+  createdAt    DateTime      @default(now())
+  attachments  Attachment[]
+  readReceipts ReadReceipt[]
+}
+
+model Attachment {
+  id        Int     @id @default(autoincrement())
+  messageId Int
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  name      String
+  path      String
+  mimeType  String
+  size      Int
+}
+
+model ReadReceipt {
+  id        Int      @id @default(autoincrement())
+  messageId Int
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt    DateTime @default(now())
+}
+
+model Note {
+  id          Int      @id @default(autoincrement())
+  title       String
+  content     String
+  isPinned    Boolean  @default(false)
+  category    String?
+  createdById Int
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model OfficialLetter {
+  id              Int          @id @default(autoincrement())
+  title           String
+  content         String
+  referenceNumber String?      @unique
+  status          LetterStatus @default(DRAFT)
+  createdById     Int
+  createdBy       User         @relation("Creator", fields: [createdById], references: [id])
+  approverId      Int?
+  approver        User?        @relation("Approver", fields: [approverId], references: [id])
+  filePath        String?
+  rejectionReason String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Announcement {
+  id          Int      @id @default(autoincrement())
+  title       String
+  content     String
+  createdById Int
+  createdAt   DateTime @default(now())
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  action    String
+  details   String?
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+}

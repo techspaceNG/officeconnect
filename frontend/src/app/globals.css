@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 5% 98%; /* SF clean off-white background */
+    --foreground: 240 10% 4%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 4%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 4%;
+
+    --primary: 211 100% 50%; /* Apple SF System Blue #007AFF */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 5% 94%;
+    --secondary-foreground: 240 10% 4%;
+
+    --muted: 240 5% 94%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 240 5% 92%;
+    --accent-foreground: 240 10% 4%;
+
+    --destructive: 354 100% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 5% 90%;
+    --input: 240 5% 90%;
+    --ring: 211 100% 50%;
+
+    --radius: 14px;
+  }
+
+  .dark {
+    --background: 0 0% 3%; /* macOS Sonoma Dark Pure Obsidian */
+    --foreground: 0 0% 98%;
+
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 211 100% 52%; /* Vibrant Apple System Blue */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 63%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 354 100% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 13%;
+    --input: 0 0% 13%;
+    --ring: 211 100% 52%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    letter-spacing: -0.018em;
+  }
+}
+
+/* Premium Apple-like Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 140, 140, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 140, 140, 0.35);
+}
+
+/* Glassmorphism panel matching macOS sidebar & iOS control center */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(30px) saturate(190%);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+.dark .glass-panel {
+  background: rgba(18, 18, 20, 0.75);
+  backdrop-filter: blur(30px) saturate(190%);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.apple-card {
+  @apply bg-card border border-border/70 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.03)] dark:shadow-[0_2px_15px_rgba(0,0,0,0.3)] transition-all duration-200;
+}
+.apple-card:hover {
+  @apply border-border shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.4)];
+}
+
+/* Inputs and Buttons matching macOS Sonoma / iOS 17 */
+.apple-input {
+  @apply bg-secondary/60 border border-border/50 rounded-xl px-3.5 py-2 text-sm outline-none transition-all focus:border-primary focus:bg-background focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/60;
+}
+.apple-button {
+  @apply bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.98] px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer select-none;
+}
+.apple-button-secondary {
+  @apply bg-secondary hover:bg-secondary/80 active:scale-[0.98] text-foreground px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer select-none border border-border/40;
+}
+
+/* macOS Segmented Control Tab Switcher */
+.apple-segmented-control {
+  @apply bg-secondary/80 p-1 rounded-xl flex items-center gap-1 border border-border/40;
+}
+.apple-segmented-item {
+  @apply px-3 py-1.5 rounded-lg text-xs font-medium transition-all select-none cursor-pointer text-muted-foreground hover:text-foreground;
+}
+.apple-segmented-item-active {
+  @apply bg-background text-foreground shadow-sm font-semibold;
+}
+
+/* iMessage style chat bubble */
+.imessage-bubble-sent {
+  @apply bg-primary text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm shadow-sm max-w-[75%];
+}
+.imessage-bubble-received {
+  @apply bg-secondary text-foreground rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm max-w-[75%] border border-border/40;
+}
