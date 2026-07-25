@@ -19,7 +19,7 @@ import { SearchController } from './search.controller';
       isGlobal: true,
     }),
     ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', '..', 'storage'),
+      rootPath: join(process.cwd(), '..', 'storage'),
       serveRoot: '/storage',
     }),
     PrismaModule,

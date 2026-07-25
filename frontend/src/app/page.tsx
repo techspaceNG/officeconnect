@@ -18,6 +18,7 @@ import {
   Sun,
   Moon,
   Menu,
+  Bell,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
@@ -50,6 +51,23 @@ export default function Home() {
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [pendingLetters, setPendingLetters] = useState<any[]>([]);
   const [recentFiles, setRecentFiles] = useState<any[]>([]);
+
+  // Real-time Toast Notification State
+  const [toastNotification, setToastNotification] = useState<{
+    title: string;
+    message: string;
+    type?: string;
+    time: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (toastNotification) {
+      const timer = setTimeout(() => {
+        setToastNotification(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastNotification]);
 
   // Mobile drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -160,7 +178,7 @@ export default function Home() {
     try {
       await apiRequest(`/letters/${id}/approve`, { method: 'POST' });
       if (user) fetchDashboardData(user);
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -173,7 +191,7 @@ export default function Home() {
         body: JSON.stringify({ reason }),
       });
       if (user) fetchDashboardData(user);
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -182,14 +200,36 @@ export default function Home() {
     if (!user) return;
     const socket = getSocket();
 
-    const handleNotification = () => {
+    const handleNotification = (data: any) => {
       fetchDashboardData(user);
+      if (data?.message && data.message.senderId !== user.id) {
+        setToastNotification({
+          title: `New Message from ${data.message.sender?.fullName || 'Colleague'}`,
+          message: data.message.content || 'Sent an attachment',
+          type: 'chat',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        });
+      }
+    };
+
+    const handleFileShared = (data: any) => {
+      if (data?.sharedWithId === user.id) {
+        setToastNotification({
+          title: 'New File Shared',
+          message: `${data.senderName || 'A colleague'} shared "${data.fileName || 'a document'}" with you.`,
+          type: 'file',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        });
+        fetchDashboardData(user);
+      }
     };
 
     socket.on('messageNotification', handleNotification);
+    socket.on('fileSharedNotification', handleFileShared);
 
     return () => {
       socket.off('messageNotification', handleNotification);
+      socket.off('fileSharedNotification', handleFileShared);
     };
   }, [user]);
 
@@ -498,6 +538,27 @@ export default function Home() {
 
         {/* Page Content Panel */}
         <main className="flex-1 overflow-y-auto p-6 relative">
+          {/* Floating Toast Notification */}
+          {toastNotification && (
+            <div className="fixed top-16 right-6 z-50 max-w-sm w-full apple-card p-4 shadow-2xl border border-primary/30 bg-background/95 backdrop-blur-xl animate-in slide-in-from-top-4 duration-300 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0 mt-0.5 font-bold">
+                <Bell size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-bold text-foreground truncate">{toastNotification.title}</h4>
+                  <span className="text-[9px] text-muted-foreground shrink-0">{toastNotification.time}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">{toastNotification.message}</p>
+              </div>
+              <button
+                onClick={() => setToastNotification(null)}
+                className="text-muted-foreground hover:text-foreground p-1 shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
           {/* Global Search Overlay */}
           {showSearchModal && searchResults && (
             <div className="absolute inset-0 bg-background/95 backdrop-blur-xl z-30 p-6 overflow-y-auto">
