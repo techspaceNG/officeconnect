@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Hash, MessageSquare, Send, Paperclip, Plus, Users, Search, User } from 'lucide-react';
-import { apiRequest, getApiUrl } from '../lib/api';
+import { apiRequest, apiDownloadBlob, getApiUrl } from '../lib/api';
 import { getSocket } from '../lib/socket';
 
 interface ChatConsoleProps {
@@ -182,7 +182,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
         return;
       }
       const fileId = fileIdMatch[1];
-      const blob = await apiRequest(`/files/download/${fileId}`);
+      const blob = await apiDownloadBlob(`/files/download/${fileId}`);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

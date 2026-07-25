@@ -29,11 +29,38 @@ export async function apiRequest(endpoint: string, options: RequestInit = {}) {
     throw new Error(errorMsg);
   }
 
-  // Handle file downloads
-  const contentType = response.headers.get('content-type');
-  if (contentType && (contentType.includes('application/octet-stream') || response.headers.get('content-disposition'))) {
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  const contentDisposition = response.headers.get('content-disposition');
+
+  // If response has content-disposition header or is not JSON, return binary Blob
+  if (contentDisposition || (contentType && !contentType.includes('application/json'))) {
     return response.blob();
   }
 
   return response.json();
+}
+
+export async function apiDownloadBlob(endpoint: string, options: RequestInit = {}) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const headers = new Headers(options.headers || {});
+
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${getApiUrl()}${endpoint}`, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    let errorMsg = 'Download failed';
+    try {
+      const data = await response.json();
+      errorMsg = data.message || errorMsg;
+    } catch (e) {}
+    throw new Error(errorMsg);
+  }
+
+  return response.blob();
 }

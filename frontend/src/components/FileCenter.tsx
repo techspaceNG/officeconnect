@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Folder, FileText, ArrowLeft, Upload, FolderPlus, Trash2, RotateCcw, Download, Plus, HardDrive, Share2 } from 'lucide-react';
-import { apiRequest } from '../lib/api';
+import { apiRequest, apiDownloadBlob } from '../lib/api';
 
 interface FileCenterProps {
   user: any;
@@ -243,7 +243,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
 
   const handleDownload = async (fileId: number, fileName: string) => {
     try {
-      const blob = await apiRequest(`/files/download/${fileId}`);
+      const blob = await apiDownloadBlob(`/files/download/${fileId}`);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
