@@ -269,13 +269,100 @@ systemctl restart nginx
 
 ---
 
+## 🔒 Step 8: Enable SSL/HTTPS for WebRTC Audio & Video Calling Over LAN
+
+Browsers (Chrome, Safari, Edge, Firefox) restrict WebRTC Camera and Microphone access over HTTP when accessing via a LAN IP address. To enable seamless 1-on-1 and Group Video/Audio calls across your institution's LAN, enable HTTPS on Nginx:
+
+1. **Generate SSL Certificate for your LAN IP / Hostname**:
+
+```bash
+mkdir -p /etc/nginx/ssl
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/officeconnect.key \
+  -out /etc/nginx/ssl/officeconnect.crt \
+  -subj "/C=NG/ST=Kano/L=Bichi/O=FCET Bichi/OU=ICT/CN=192.168.1.50"
+```
+*(Replace `192.168.1.50` with your LXC container's static IP).*
+
+2. **Update Nginx Configuration at `/etc/nginx/sites-available/officeconnect`**:
+
+```nginx
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
+    server_name _;
+
+    ssl_certificate /etc/nginx/ssl/officeconnect.crt;
+    ssl_certificate_key /etc/nginx/ssl/officeconnect.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 100M;
+
+    # Frontend Client
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Backend REST API
+    location /api/ {
+        proxy_pass http://127.0.0.1:4000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Uploaded Files & Static Assets
+    location /storage/ {
+        proxy_pass http://127.0.0.1:4000/storage/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    # WebSockets Gateway (Chat & WebRTC Signaling)
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:4000/socket.io/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+3. **Restart Nginx**:
+
+```bash
+nginx -t && systemctl restart nginx
+```
+
+Now access `https://192.168.1.50` from any browser on the LAN. Accept the certificate prompt once, and Audio/Video calls will start instantly!
+
+---
+
 ## ✅ Verification Checklist
 
 From any workstation browser on the LAN:
 
-- [x] Navigate to `http://<CONTAINER-STATIC-IP>` (e.g. `http://192.168.1.50`).
-- [x] Verify Apple-inspired login page loads.
+- [x] Navigate to `https://<CONTAINER-STATIC-IP>` (e.g. `https://192.168.1.50`).
+- [x] Verify Apple-inspired login page loads over HTTPS.
 - [x] Log in with seed admin account (`admin` / `admin123`).
-- [x] Test real-time Chat WebSockets across 2 client tabs.
+- [x] Test real-time Chat WebSockets & WebRTC Audio/Video calls.
 - [x] Test uploading and sharing a document in File Center.
 - [x] Test drafting and approving an official letter in Correspondence module.
+
