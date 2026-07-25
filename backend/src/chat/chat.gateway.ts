@@ -131,4 +131,78 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       receipt,
     });
   }
+
+  // --- WebRTC Audio & Video Call Signaling ---
+
+  @SubscribeMessage('callUser')
+  handleCallUser(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { channelId: number; offer: any; callType: 'audio' | 'video'; isGroup?: boolean },
+  ) {
+    const sender = client.data.user;
+    const roomName = `channel_${data.channelId}`;
+    client.to(roomName).emit('incomingCall', {
+      channelId: data.channelId,
+      caller: {
+        id: sender.sub,
+        username: sender.username,
+        fullName: sender.fullName || sender.username,
+      },
+      offer: data.offer,
+      callType: data.callType,
+      isGroup: !!data.isGroup,
+    });
+  }
+
+  @SubscribeMessage('answerCall')
+  handleAnswerCall(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { channelId: number; answer: any },
+  ) {
+    const sender = client.data.user;
+    const roomName = `channel_${data.channelId}`;
+    client.to(roomName).emit('callAccepted', {
+      channelId: data.channelId,
+      answer: data.answer,
+      answeringUser: {
+        id: sender.sub,
+        username: sender.username,
+        fullName: sender.fullName || sender.username,
+      },
+    });
+  }
+
+  @SubscribeMessage('iceCandidate')
+  handleIceCandidate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { channelId: number; candidate: any },
+  ) {
+    const roomName = `channel_${data.channelId}`;
+    client.to(roomName).emit('iceCandidate', {
+      channelId: data.channelId,
+      candidate: data.candidate,
+    });
+  }
+
+  @SubscribeMessage('endCall')
+  handleEndCall(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { channelId: number },
+  ) {
+    const roomName = `channel_${data.channelId}`;
+    this.server.to(roomName).emit('callEnded', {
+      channelId: data.channelId,
+    });
+  }
+
+  @SubscribeMessage('rejectCall')
+  handleRejectCall(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { channelId: number },
+  ) {
+    const roomName = `channel_${data.channelId}`;
+    client.to(roomName).emit('callRejected', {
+      channelId: data.channelId,
+    });
+  }
 }
