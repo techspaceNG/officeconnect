@@ -176,13 +176,11 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
 
   const handleDownloadAttachment = async (pathStr: string, fileName: string) => {
     try {
-      const fileIdMatch = pathStr.match(/\/(\d+)_/);
-      if (!fileIdMatch) {
-        alert('File path structure error');
-        return;
-      }
-      const fileId = fileIdMatch[1];
-      const blob = await apiDownloadBlob(`/files/download/${fileId}`);
+      const cleanPath = pathStr.replace(/\\/g, '/');
+      const fileUrl = `${getApiUrl()}/storage/${cleanPath}`;
+      const response = await fetch(fileUrl);
+      if (!response.ok) throw new Error('File download failed');
+      const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -190,7 +188,8 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-    } catch (e) {
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -316,19 +315,39 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
                     <div className={isMe ? 'imessage-bubble-sent' : 'imessage-bubble-received'}>
                       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
 
-                      {/* Attachments rendering */}
-                      {msg.attachments?.map((att: any) => (
-                        <div
-                          key={att.id}
-                          onClick={() => handleDownloadAttachment(att.path, att.name)}
-                          className={`mt-2 flex items-center gap-2 p-2 rounded-xl text-xs cursor-pointer border hover:underline transition-all ${
-                            isMe ? 'bg-white/10 border-white/20 text-white' : 'bg-background border-border text-foreground'
-                          }`}
-                        >
-                          <Paperclip size={12} />
-                          <span className="truncate flex-1 font-medium">{att.name}</span>
-                        </div>
-                      ))}
+                      {/* Attachments rendering with Image Preview */}
+                      {msg.attachments?.map((att: any) => {
+                        const cleanPath = att.path ? att.path.replace(/\\/g, '/') : '';
+                        const fileUrl = `${getApiUrl()}/storage/${cleanPath}`;
+                        const isImage =
+                          (att.mimeType && att.mimeType.startsWith('image/')) ||
+                          /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(att.name);
+
+                        return (
+                          <div key={att.id} className="mt-2 space-y-1">
+                            {isImage && (
+                              <div className="relative group max-w-xs overflow-hidden rounded-xl border border-border/40 bg-background/50">
+                                <img
+                                  src={fileUrl}
+                                  alt={att.name}
+                                  className="w-full max-h-60 object-cover cursor-pointer hover:opacity-90 transition-all"
+                                  onClick={() => window.open(fileUrl, '_blank')}
+                                />
+                              </div>
+                            )}
+
+                            <div
+                              onClick={() => handleDownloadAttachment(att.path, att.name)}
+                              className={`flex items-center gap-2 p-2 rounded-xl text-xs cursor-pointer border hover:underline transition-all ${
+                                isMe ? 'bg-white/10 border-white/20 text-white' : 'bg-background border-border text-foreground'
+                              }`}
+                            >
+                              <Paperclip size={12} />
+                              <span className="truncate flex-1 font-medium">{att.name}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     <span className="text-[9px] text-muted-foreground/60 mt-1 px-1">

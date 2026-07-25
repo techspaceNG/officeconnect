@@ -51,11 +51,31 @@ export class FilesService {
   }
 
   async getFolderContents(folderId: number | null, userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+
+    const folderWhere: any = {
+      parentId: folderId,
+      isRecycled: false,
+    };
+
+    const fileWhere: any = {
+      folderId: folderId,
+      isRecycled: false,
+    };
+
+    // If non-admin user is at root level (folderId === null), show only their own uploads
+    if (!isSuperAdmin && folderId === null) {
+      folderWhere.createdById = userId;
+      fileWhere.createdById = userId;
+    }
+
     const folders = await this.prisma.fileFolder.findMany({
-      where: {
-        parentId: folderId,
-        isRecycled: false,
-      },
+      where: folderWhere,
       include: {
         createdBy: {
           select: { id: true, username: true, fullName: true },
@@ -64,10 +84,7 @@ export class FilesService {
     });
 
     const files = await this.prisma.file.findMany({
-      where: {
-        folderId: folderId,
-        isRecycled: false,
-      },
+      where: fileWhere,
       include: {
         createdBy: {
           select: { id: true, username: true, fullName: true },
