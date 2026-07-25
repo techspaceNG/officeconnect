@@ -225,15 +225,15 @@ export default function Home() {
             <span className="w-3 h-3 rounded-full bg-[#27C93F] border border-black/10 inline-block"></span>
           </div>
 
-          <div className="text-center space-y-1.5">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-primary to-indigo-600 flex items-center justify-center mx-auto shadow-md shadow-primary/30 text-white">
-              <Sparkles size={28} />
+          <div className="text-center space-y-2">
+            <div className="w-20 h-20 rounded-2xl bg-white p-2 flex items-center justify-center mx-auto shadow-md border border-border/40">
+              <img src="/logo.png" alt="FCET Bichi Logo" className="w-full h-full object-contain" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight pt-2">
+            <h1 className="text-2xl font-bold tracking-tight pt-1">
               OfficeConnect
             </h1>
-            <p className="text-xs text-muted-foreground font-medium">
-              ICT Department • Institutional LAN Portal
+            <p className="text-xs text-muted-foreground font-semibold">
+              ICT Department — FCET Bichi
             </p>
           </div>
 
@@ -281,10 +281,13 @@ export default function Home() {
             </button>
           </form>
 
-          <div className="pt-4 border-t border-border/40 text-center">
-            <span className="text-[10px] text-muted-foreground/70 font-medium">
-              Protected HPE Gen10 Enterprise LAN Instance
-            </span>
+          <div className="pt-3 border-t border-border/40 text-center space-y-0.5">
+            <p className="text-[11px] text-muted-foreground font-medium">
+              Powered by <span className="font-bold text-foreground">Techspaceng</span>
+            </p>
+            <p className="text-[10px] text-muted-foreground/80 font-mono">
+              techspace544@gmail.com
+            </p>
           </div>
         </div>
       </div>
@@ -302,7 +305,10 @@ export default function Home() {
             <span className="w-3 h-3 rounded-full bg-[#FFBD2E] border border-black/10 inline-block cursor-pointer"></span>
             <span className="w-3 h-3 rounded-full bg-[#27C93F] border border-black/10 inline-block cursor-pointer"></span>
           </div>
-          <span className="text-[10px] font-bold text-muted-foreground tracking-wider uppercase">OfficeConnect</span>
+          <div className="flex items-center gap-1.5">
+            <img src="/logo.png" alt="Logo" className="w-4 h-4 object-contain" />
+            <span className="text-[10px] font-bold text-muted-foreground tracking-wider uppercase">OfficeConnect</span>
+          </div>
         </div>
 
         {/* Navigation links */}
