@@ -123,6 +123,42 @@ export default function Home() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const ringtoneIntervalRef = useRef<any>(null);
+
+  // Audio Ringtone Generator (Web Audio API)
+  const playRingtone = () => {
+    try {
+      if (typeof window === 'undefined') return;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      
+      const ctx = new AudioCtx();
+      const playBeep = () => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 1.2);
+      };
+
+      playBeep();
+      ringtoneIntervalRef.current = setInterval(playBeep, 2000);
+    } catch (e) {
+      console.error('Ringtone error:', e);
+    }
+  };
+
+  const stopRingtone = () => {
+    if (ringtoneIntervalRef.current) {
+      clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = null;
+    }
+  };
 
   // Request browser Notification permissions on mount
   useEffect(() => {
@@ -323,6 +359,8 @@ export default function Home() {
     // --- Global WebRTC Call Socket Handlers ---
     const handleIncomingCall = (data: any) => {
       if (data.caller?.id !== user.id) {
+        playRingtone();
+
         setGlobalCall({
           isInCall: false,
           callType: data.callType,
@@ -332,10 +370,34 @@ export default function Home() {
           isIncoming: true,
         });
 
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const callTitle = `Incoming ${data.callType === 'video' ? 'Video Meeting' : 'Audio Call'}`;
+        const callMsg = `${data.caller?.fullName || 'A colleague'} is calling you.`;
+
+        setToastNotification({
+          title: callTitle,
+          message: callMsg,
+          type: 'call',
+          time: timeStr,
+        });
+
+        setNotifications((prev) => [
+          {
+            id: Date.now().toString(),
+            title: callTitle,
+            message: callMsg,
+            isRead: false,
+            createdAt: timeStr,
+            type: 'call',
+            targetTab: 'chat',
+          },
+          ...prev,
+        ]);
+
         // Trigger Web Notification if tab is minimized
         if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-          new Notification(`Incoming ${data.callType === 'video' ? 'Video Meeting' : 'Audio Call'}`, {
-            body: `${data.caller?.fullName || 'A colleague'} is calling you on OfficeConnect`,
+          new Notification(callTitle, {
+            body: callMsg,
             icon: '/logo.png',
           });
         }
@@ -343,6 +405,7 @@ export default function Home() {
     };
 
     const handleCallAccepted = async (data: any) => {
+      stopRingtone();
       if (peerConnectionRef.current && data.answer) {
         await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
       }
@@ -359,10 +422,25 @@ export default function Home() {
     };
 
     const handleCallEnded = () => {
+      stopRingtone();
       cleanUpCall();
     };
 
     const handleCallRejected = () => {
+      stopRingtone();
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setNotifications((prev) => [
+        {
+          id: Date.now().toString(),
+          title: 'Missed Call',
+          message: 'Call declined or missed.',
+          isRead: false,
+          createdAt: timeStr,
+          type: 'call',
+          targetTab: 'chat',
+        },
+        ...prev,
+      ]);
       cleanUpCall();
     };
 
@@ -413,8 +491,65 @@ export default function Home() {
     });
   };
 
+  // Caller Initiates Call
+  const startGlobalCall = async (channelId: number, type: 'audio' | 'video', isGroup: boolean = false) => {
+    try {
+      const stream = await getUserMediaStream(type);
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        if (remoteVideoRef.current && event.streams[0]) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const socket = getSocket();
+          socket.emit('iceCandidate', {
+            channelId,
+            candidate: event.candidate,
+          });
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const socket = getSocket();
+      socket.emit('callUser', {
+        channelId,
+        offer,
+        callType: type,
+        isGroup,
+      });
+
+      setGlobalCall({
+        isInCall: true,
+        callType: type,
+        channelId,
+        isIncoming: false,
+      });
+    } catch (err: any) {
+      alert(`Could not start ${type} call: ` + err.message);
+    }
+  };
+
+  // Recipient Accepts Call
   const acceptGlobalCall = async () => {
-    if (!globalCall || !globalCall.offer) return;
+    if (!globalCall || !globalCall.offer) {
+      alert('Call details missing.');
+      return;
+    }
+    stopRingtone();
     try {
       const type = globalCall.callType;
       const stream = await getUserMediaStream(type);
@@ -465,6 +600,7 @@ export default function Home() {
   };
 
   const rejectGlobalCall = () => {
+    stopRingtone();
     if (globalCall) {
       const socket = getSocket();
       socket.emit('rejectCall', { channelId: globalCall.channelId });
@@ -473,6 +609,7 @@ export default function Home() {
   };
 
   const endGlobalCall = () => {
+    stopRingtone();
     if (globalCall) {
       const socket = getSocket();
       socket.emit('endCall', { channelId: globalCall.channelId });
@@ -481,6 +618,7 @@ export default function Home() {
   };
 
   const cleanUpCall = () => {
+    stopRingtone();
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
@@ -1091,6 +1229,7 @@ export default function Home() {
           {activeTab === 'chat' && (
             <ChatConsole
               user={user}
+              onStartCall={startGlobalCall}
             />
           )}
 

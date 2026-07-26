@@ -20,9 +20,10 @@ import { getSocket } from '../lib/socket';
 
 interface ChatConsoleProps {
   user: any;
+  onStartCall?: (channelId: number, type: 'audio' | 'video', isGroup?: boolean) => void;
 }
 
-export default function ChatConsole({ user }: ChatConsoleProps) {
+export default function ChatConsole({ user, onStartCall }: ChatConsoleProps) {
   const [channels, setChannels] = useState<any[]>([]);
   const [activeChannel, setActiveChannel] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
@@ -147,15 +148,12 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Initiate WebRTC Call via Socket Signal
+  // Initiate WebRTC Call via Global Parent Handler
   const initiateCall = (type: 'audio' | 'video') => {
     if (!activeChannel) return;
-    socket.emit('callUser', {
-      channelId: activeChannel.id,
-      offer: null, // Will negotiate peer connection
-      callType: type,
-      isGroup: activeChannel.isGroup,
-    });
+    if (onStartCall) {
+      onStartCall(activeChannel.id, type, activeChannel.isGroup);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -437,7 +435,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
             <div className="flex-1 p-4 sm:p-5 overflow-y-auto space-y-4">
               {messages.map((msg) => {
                 const isMe = msg.senderId === user.id;
-                const isCallLog = msg.content?.includes('📞') || msg.content?.includes('流动') || msg.content?.includes('📵');
+                const isCallLog = msg.content?.includes('📞') || msg.content?.includes('📵');
 
                 if (isCallLog) {
                   return (
@@ -511,7 +509,7 @@ export default function ChatConsole({ user }: ChatConsoleProps) {
               <div ref={chatEndRef}></div>
             </div>
 
-            {/* Upload Progress Bar Bar */}
+            {/* Upload Progress Bar */}
             {uploadProgress !== null && (
               <div className="px-5 py-2 border-t border-border/40 bg-primary/5 flex items-center gap-3">
                 <span className="text-xs font-semibold text-primary truncate flex-1">Uploading attachment...</span>
