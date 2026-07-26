@@ -123,7 +123,48 @@ export default function Home() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const pendingCandidatesRef = useRef<RTCIceCandidate[]>([]);
   const ringtoneIntervalRef = useRef<any>(null);
+
+  // Message Notification Chime Generator (Web Audio API)
+  const playMessageChime = () => {
+    try {
+      if (typeof window === 'undefined') return;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      const ctx = new AudioCtx();
+      
+      // Tone 1 (E5 - 659 Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(659.25, ctx.currentTime);
+      gain1.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start();
+      osc1.stop(ctx.currentTime + 0.2);
+
+      // Tone 2 (A5 - 880 Hz)
+      setTimeout(() => {
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(880, ctx.currentTime);
+        gain2.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start();
+        osc2.stop(ctx.currentTime + 0.35);
+      }, 100);
+    } catch (e) {
+      console.error('Message chime error:', e);
+    }
+  };
 
   // Audio Ringtone Generator (Web Audio API)
   const playRingtone = () => {
@@ -166,6 +207,18 @@ export default function Home() {
       Notification.requestPermission();
     }
   }, []);
+
+  // Auto-bind streams when active call overlay mounts
+  useEffect(() => {
+    if (globalCall?.isInCall) {
+      if (remoteVideoRef.current && remoteStreamRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+      if (localVideoRef.current && localStreamRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+    }
+  }, [globalCall?.isInCall]);
 
   // Mobile drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -266,7 +319,7 @@ export default function Home() {
       setAnnouncements(annList);
 
       setPendingLetters(lettersList.filter((l: any) => l.status === 'PENDING_APPROVAL'));
-      setRecentFiles(filesList.files.slice(0, 5));
+      setRecentFiles(filesList.slice(0, 5));
     } catch (e) {
       console.error('Error fetching dashboard stats:', e);
     }
@@ -301,6 +354,8 @@ export default function Home() {
     const handleNotification = (data: any) => {
       fetchDashboardData(user);
       if (data?.message && data.message.senderId !== user.id) {
+        playMessageChime(); // Audible chime sound on new message!
+
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const senderName = data.message.sender?.fullName || 'Colleague';
         const msgContent = data.message.content || 'Sent an attachment';
@@ -329,6 +384,7 @@ export default function Home() {
 
     const handleFileShared = (data: any) => {
       if (data?.sharedWithId === user.id) {
+        playMessageChime();
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const senderName = data.senderName || 'A colleague';
         const fileName = data.fileName || 'a document';
@@ -394,7 +450,6 @@ export default function Home() {
           ...prev,
         ]);
 
-        // Trigger Web Notification if tab is minimized
         if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
           new Notification(callTitle, {
             body: callMsg,
@@ -407,17 +462,34 @@ export default function Home() {
     const handleCallAccepted = async (data: any) => {
       stopRingtone();
       if (peerConnectionRef.current && data.answer) {
-        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          
+          // Flush pending ICE candidates
+          while (pendingCandidatesRef.current.length > 0) {
+            const cand = pendingCandidatesRef.current.shift();
+            if (cand) {
+              await peerConnectionRef.current.addIceCandidate(cand);
+            }
+          }
+        } catch (e) {
+          console.error('Error applying call answer:', e);
+        }
       }
     };
 
     const handleIceCandidateReceived = async (data: any) => {
-      if (peerConnectionRef.current && data.candidate) {
+      if (!peerConnectionRef.current || !data.candidate) return;
+      const candidate = new RTCIceCandidate(data.candidate);
+
+      if (peerConnectionRef.current.remoteDescription && peerConnectionRef.current.remoteDescription.type) {
         try {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+          await peerConnectionRef.current.addIceCandidate(candidate);
         } catch (e) {
-          console.error(e);
+          console.error('Error adding ICE candidate:', e);
         }
+      } else {
+        pendingCandidatesRef.current.push(candidate);
       }
     };
 
@@ -494,6 +566,9 @@ export default function Home() {
   // Caller Initiates Call
   const startGlobalCall = async (channelId: number, type: 'audio' | 'video', isGroup: boolean = false) => {
     try {
+      pendingCandidatesRef.current = [];
+      remoteStreamRef.current = new MediaStream();
+
       const stream = await getUserMediaStream(type);
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
@@ -506,8 +581,13 @@ export default function Home() {
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
       pc.ontrack = (event) => {
-        if (remoteVideoRef.current && event.streams[0]) {
-          remoteVideoRef.current.srcObject = event.streams[0];
+        if (event.streams && event.streams[0]) {
+          remoteStreamRef.current = event.streams[0];
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+        } else if (event.track) {
+          if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
+          remoteStreamRef.current.addTrack(event.track);
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
         }
       };
 
@@ -551,6 +631,9 @@ export default function Home() {
     }
     stopRingtone();
     try {
+      pendingCandidatesRef.current = [];
+      remoteStreamRef.current = new MediaStream();
+
       const type = globalCall.callType;
       const stream = await getUserMediaStream(type);
       localStreamRef.current = stream;
@@ -564,8 +647,13 @@ export default function Home() {
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
       pc.ontrack = (event) => {
-        if (remoteVideoRef.current && event.streams[0]) {
-          remoteVideoRef.current.srcObject = event.streams[0];
+        if (event.streams && event.streams[0]) {
+          remoteStreamRef.current = event.streams[0];
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+        } else if (event.track) {
+          if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
+          remoteStreamRef.current.addTrack(event.track);
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
         }
       };
 
@@ -582,6 +670,12 @@ export default function Home() {
       await pc.setRemoteDescription(new RTCSessionDescription(globalCall.offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+
+      // Flush candidates
+      while (pendingCandidatesRef.current.length > 0) {
+        const cand = pendingCandidatesRef.current.shift();
+        if (cand) await pc.addIceCandidate(cand);
+      }
 
       const socket = getSocket();
       socket.emit('answerCall', {
@@ -627,6 +721,10 @@ export default function Home() {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach((t) => t.stop());
+      remoteStreamRef.current = null;
+    }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
@@ -634,6 +732,7 @@ export default function Home() {
     setIsMicMuted(false);
     setIsCamOff(false);
     setShowMeetingNotes(false);
+    pendingCandidatesRef.current = [];
   };
 
   const toggleMic = () => {
@@ -1336,7 +1435,7 @@ export default function Home() {
                     ref={localVideoRef}
                     autoPlay
                     playsInline
-                    muted
+                    muted={true}
                     className="w-full h-full object-cover"
                   />
                   {isCamOff && (
