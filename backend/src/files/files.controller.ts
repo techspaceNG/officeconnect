@@ -119,9 +119,16 @@ export class FilesController {
   async shareFile(
     @Request() req,
     @Body('fileId') fileId: number,
-    @Body('sharedWithId') sharedWithId: number,
+    @Body('userIds') userIds?: number[],
+    @Body('sharedWithId') sharedWithId?: number,
   ) {
-    return this.filesService.shareFile(fileId, sharedWithId, req.user.id);
+    const targets = Array.isArray(userIds) ? userIds : (sharedWithId ? [sharedWithId] : []);
+    const results = [];
+    for (const targetId of targets) {
+      const res = await this.filesService.shareFile(fileId, targetId, req.user.id);
+      results.push(res);
+    }
+    return { success: true, count: results.length, files: results };
   }
 
   @Get('shared-with-me')

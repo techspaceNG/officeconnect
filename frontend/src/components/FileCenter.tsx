@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { apiRequest, apiDownloadBlob, apiUploadWithProgress, getApiUrl } from '../lib/api';
+import { getSocket } from '../lib/socket';
 
 interface FileCenterProps {
   user: any;
@@ -111,7 +112,23 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     } else if (activeView === 'shared') {
       fetchSharedWithMe();
     }
-  }, [currentFolderId, activeView]);
+
+    const socket = getSocket();
+    const handleFileSharedNotification = (data: any) => {
+      if (data.sharedWithId === user.id) {
+        if (activeView === 'shared') {
+          fetchSharedWithMe();
+        } else if (activeView === 'my-files') {
+          fetchContents(currentFolderId);
+        }
+      }
+    };
+
+    socket.on('fileSharedNotification', handleFileSharedNotification);
+    return () => {
+      socket.off('fileSharedNotification', handleFileSharedNotification);
+    };
+  }, [currentFolderId, activeView, user]);
 
   useEffect(() => {
     fetchAllUsers();
@@ -270,6 +287,16 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
           userIds: selectedShareUserIds,
         }),
       });
+
+      const socket = getSocket();
+      selectedShareUserIds.forEach((targetId) => {
+        socket.emit('fileShared', {
+          fileId: activeShareFile.id,
+          fileName: activeShareFile.name,
+          sharedWithId: targetId,
+        });
+      });
+
       alert('File successfully shared!');
       setShowShareModal(false);
       setActiveShareFile(null);

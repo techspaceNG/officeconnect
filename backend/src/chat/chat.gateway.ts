@@ -244,4 +244,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       channelId: data.channelId,
     });
   }
+
+  @SubscribeMessage('fileShared')
+  handleFileShared(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { fileId: number; fileName: string; sharedWithId: number },
+  ) {
+    const sender = client.data.user;
+    this.server.emit('fileSharedNotification', {
+      fileId: data.fileId,
+      fileName: data.fileName,
+      sharedWithId: data.sharedWithId,
+      senderId: sender?.sub,
+      senderName: sender?.fullName || sender?.username || 'A colleague',
+    });
+  }
 }

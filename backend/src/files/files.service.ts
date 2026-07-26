@@ -387,7 +387,6 @@ export class FilesService {
       include: { versions: true },
     });
     if (!file) throw new NotFoundException('File not found');
-    if (file.createdById !== userId) throw new ForbiddenException('You do not own this file');
 
     // Create a duplicated entry for the recipient user
     return this.prisma.file.create({
@@ -397,7 +396,7 @@ export class FilesService {
         mimeType: file.mimeType,
         size: file.size,
         path: file.path,
-        createdById: userId,
+        createdById: file.createdById,
         sharedWithId: sharedWithId,
         versions: {
           create: file.versions.map((v) => ({
@@ -406,6 +405,11 @@ export class FilesService {
             size: v.size,
             createdById: v.createdById,
           })),
+        },
+      },
+      include: {
+        createdBy: {
+          select: { id: true, username: true, fullName: true },
         },
       },
     });
