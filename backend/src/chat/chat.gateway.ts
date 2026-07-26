@@ -141,13 +141,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- WebRTC Audio & Video Call Signaling ---
 
   @SubscribeMessage('callUser')
-  handleCallUser(
+  async handleCallUser(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { channelId: number; offer: any; callType: 'audio' | 'video'; isGroup?: boolean },
   ) {
     const sender = client.data.user;
+    if (!sender) return;
+
+    // Save Call Log Message to Chat DB
+    const callMsg = await this.chatService.saveMessage(
+      data.channelId,
+      sender.sub,
+      `📞 ${data.callType === 'video' ? 'Video Meeting' : 'Audio Call'} Started`,
+      [],
+    );
+
     const roomName = `channel_${data.channelId}`;
-    client.to(roomName).emit('incomingCall', {
+    this.server.to(roomName).emit('message', callMsg);
+
+    // Broadcast incomingCall globally so users receive ringing alert on any page/tab
+    this.server.emit('incomingCall', {
       channelId: data.channelId,
       caller: {
         id: sender.sub,
@@ -166,8 +179,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { channelId: number; answer: any },
   ) {
     const sender = client.data.user;
-    const roomName = `channel_${data.channelId}`;
-    client.to(roomName).emit('callAccepted', {
+    this.server.emit('callAccepted', {
       channelId: data.channelId,
       answer: data.answer,
       answeringUser: {
@@ -183,31 +195,52 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { channelId: number; candidate: any },
   ) {
-    const roomName = `channel_${data.channelId}`;
-    client.to(roomName).emit('iceCandidate', {
+    this.server.emit('iceCandidate', {
       channelId: data.channelId,
       candidate: data.candidate,
     });
   }
 
   @SubscribeMessage('endCall')
-  handleEndCall(
+  async handleEndCall(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { channelId: number },
   ) {
-    const roomName = `channel_${data.channelId}`;
-    this.server.to(roomName).emit('callEnded', {
+    const sender = client.data.user;
+    if (sender) {
+      const endMsg = await this.chatService.saveMessage(
+        data.channelId,
+        sender.sub,
+        `📞 Call Ended`,
+        [],
+      );
+      const roomName = `channel_${data.channelId}`;
+      this.server.to(roomName).emit('message', endMsg);
+    }
+
+    this.server.emit('callEnded', {
       channelId: data.channelId,
     });
   }
 
   @SubscribeMessage('rejectCall')
-  handleRejectCall(
+  async handleRejectCall(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { channelId: number },
   ) {
-    const roomName = `channel_${data.channelId}`;
-    client.to(roomName).emit('callRejected', {
+    const sender = client.data.user;
+    if (sender) {
+      const rejectMsg = await this.chatService.saveMessage(
+        data.channelId,
+        sender.sub,
+        `📵 Call Declined / Missed`,
+        [],
+      );
+      const roomName = `channel_${data.channelId}`;
+      this.server.to(roomName).emit('message', rejectMsg);
+    }
+
+    this.server.emit('callRejected', {
       channelId: data.channelId,
     });
   }

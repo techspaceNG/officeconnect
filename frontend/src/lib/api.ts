@@ -64,3 +64,49 @@ export async function apiDownloadBlob(endpoint: string, options: RequestInit = {
 
   return response.blob();
 }
+
+export function apiUploadWithProgress(
+  endpoint: string,
+  formData: FormData,
+  onProgress?: (progress: number) => void
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+    xhr.open('POST', `${getApiUrl()}${endpoint}`);
+
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          onProgress(percentComplete);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (e) {
+          resolve(xhr.responseText);
+        }
+      } else {
+        let errorMsg = 'Upload failed';
+        try {
+          const data = JSON.parse(xhr.responseText);
+          errorMsg = data.message || errorMsg;
+        } catch (e) {}
+        reject(new Error(errorMsg));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.send(formData);
+  });
+}

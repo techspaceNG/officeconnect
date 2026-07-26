@@ -1,6 +1,24 @@
-import React, { useState, useRef } from 'react';
-import { Folder, FileText, ArrowLeft, Upload, FolderPlus, Trash2, RotateCcw, Download, Plus, HardDrive, Share2 } from 'lucide-react';
-import { apiRequest, apiDownloadBlob } from '../lib/api';
+import React, { useState, useEffect } from 'react';
+import {
+  FolderPlus,
+  Upload,
+  Folder,
+  File,
+  Trash2,
+  Share2,
+  HardDrive,
+  Clock,
+  User,
+  Eye,
+  Download,
+  RotateCcw,
+  AlertTriangle,
+  ChevronRight,
+  Home,
+  Check,
+  X,
+} from 'lucide-react';
+import { apiRequest, apiDownloadBlob, apiUploadWithProgress, getApiUrl } from '../lib/api';
 
 interface FileCenterProps {
   user: any;
@@ -9,87 +27,43 @@ interface FileCenterProps {
 
 export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
   const [currentFolderId, setCurrentFolderId] = useState<number | null>(null);
+  const [breadcrumbs, setBreadcrumbs] = useState<Array<{ id: number | null; name: string }>>([
+    { id: null, name: 'Root (All Files)' },
+  ]);
+
   const [folders, setFolders] = useState<any[]>([]);
   const [files, setFiles] = useState<any[]>([]);
-  const [breadcrumbs, setBreadcrumbs] = useState<any[]>([]);
-  const [inRecycleBin, setInRecycleBin] = useState<boolean>(false);
-  const [inSharedView, setInSharedView] = useState<boolean>(false);
-  
-  const [recycledFolders, setRecycledFolders] = useState<any[]>([]);
-  const [recycledFiles, setRecycledFiles] = useState<any[]>([]);
-  const [sharedFiles, setSharedFiles] = useState<any[]>([]);
 
-  const [showShareModal, setShowShareModal] = useState<boolean>(false);
-  const [shareFileId, setShareFileId] = useState<number | null>(null);
-  const [users, setUsers] = useState<any[]>([]);
+  // Selection & Modals
+  const [selectedFile, setSelectedFile] = useState<any | null>(null);
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [activeShareFile, setActiveShareFile] = useState<any | null>(null);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [selectedShareUserIds, setSelectedShareUserIds] = useState<number[]>([]);
+
+  const [activeVersionFileId, setActiveVersionFileId] = useState<number | null>(null);
+
+  // Tab View: 'my-files' vs 'shared' vs 'recycle'
+  const [activeView, setActiveView] = useState<'my-files' | 'shared' | 'recycle'>('my-files');
+  const [recycleFiles, setRecycleFiles] = useState<any[]>([]);
+  const [recycleFolders, setRecycleFolders] = useState<any[]>([]);
+  const [sharedWithMeFiles, setSharedWithMeFiles] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
-
-  const fetchSharedWithMe = async () => {
-    setLoading(true);
-    try {
-      const data = await apiRequest('/files/shared-with-me');
-      setSharedFiles(data || []);
-      setInSharedView(true);
-      setInRecycleBin(false);
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchUsers = async () => {
-    try {
-      const data = await apiRequest('/users');
-      setUsers(data.filter((u: any) => u.id !== user.id));
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const triggerShareModal = (fileId: number) => {
-    setShareFileId(fileId);
-    fetchUsers();
-    setShowShareModal(true);
-  };
-
-  const handleShareSubmit = async (targetUserId: number) => {
-    if (!shareFileId) return;
-    setLoading(true);
-    try {
-      await apiRequest('/files/share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId: shareFileId, sharedWithId: targetUserId }),
-      });
-      setShowShareModal(false);
-      setShareFileId(null);
-      alert('File shared successfully!');
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const versionInputRef = useRef<HTMLInputElement>(null);
-  const [activeVersionFileId, setActiveVersionFileId] = useState<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const fetchContents = async (folderId: number | null) => {
     setLoading(true);
     try {
       const url = folderId ? `/files/folder/contents?folderId=${folderId}` : '/files/folder/contents';
       const data = await apiRequest(url);
-      setFolders(data.folders || []);
-      setFiles(data.files || []);
-      setBreadcrumbs(data.breadcrumbs || []);
-      setInRecycleBin(false);
-      setInSharedView(false);
+      setFolders(data.folders);
+      setFiles(data.files);
     } catch (e) {
-      alert(e.message);
+      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -99,33 +73,75 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     setLoading(true);
     try {
       const data = await apiRequest('/files/recycle-bin');
-      setRecycledFolders(data.folders || []);
-      setRecycledFiles(data.files || []);
-      setInRecycleBin(true);
-      setInSharedView(false);
+      setRecycleFiles(data.files);
+      setRecycleFolders(data.folders);
     } catch (e) {
-      alert(e.message);
+      console.error(e);
     } finally {
       setLoading(false);
     }
   };
 
-  React.useEffect(() => {
-    fetchContents(currentFolderId);
-  }, [currentFolderId]);
+  const fetchSharedWithMe = async () => {
+    setLoading(true);
+    try {
+      const data = await apiRequest('/files/shared-with-me');
+      setSharedWithMeFiles(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleCreateFolder = async () => {
-    const name = prompt('Enter folder name:');
-    if (!name) return;
+  const fetchAllUsers = async () => {
+    try {
+      const u = await apiRequest('/users');
+      setAllUsers(u.filter((x: any) => x.id !== user.id));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeView === 'my-files') {
+      fetchContents(currentFolderId);
+    } else if (activeView === 'recycle') {
+      fetchRecycleBin();
+    } else if (activeView === 'shared') {
+      fetchSharedWithMe();
+    }
+  }, [currentFolderId, activeView]);
+
+  useEffect(() => {
+    fetchAllUsers();
+  }, []);
+
+  const handleOpenFolder = (fol: { id: number; name: string }) => {
+    setCurrentFolderId(fol.id);
+    setBreadcrumbs((prev) => [...prev, { id: fol.id, name: fol.name }]);
+  };
+
+  const handleBreadcrumbClick = (index: number) => {
+    const target = breadcrumbs[index];
+    setBreadcrumbs(breadcrumbs.slice(0, index + 1));
+    setCurrentFolderId(target.id);
+  };
+
+  const handleCreateFolderSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
 
     try {
       await apiRequest('/files/folder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, parentId: currentFolderId }),
+        body: JSON.stringify({ name: newFolderName, parentId: currentFolderId }),
       });
+      setNewFolderName('');
+      setShowNewFolderModal(false);
       fetchContents(currentFolderId);
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -138,6 +154,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
 
   const uploadFile = async (file: File) => {
     setLoading(true);
+    setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', file);
     if (currentFolderId) {
@@ -145,16 +162,16 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     }
 
     try {
-      await apiRequest('/files/upload', {
-        method: 'POST',
-        body: formData,
+      await apiUploadWithProgress('/files/upload', formData, (progress) => {
+        setUploadProgress(progress);
       });
       fetchContents(currentFolderId);
       onRefreshStats();
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     } finally {
       setLoading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -163,20 +180,21 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     const file = e.target.files[0];
     
     setLoading(true);
+    setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      await apiRequest(`/files/upload-version/${activeVersionFileId}`, {
-        method: 'POST',
-        body: formData,
+      await apiUploadWithProgress(`/files/upload-version/${activeVersionFileId}`, formData, (progress) => {
+        setUploadProgress(progress);
       });
       fetchContents(currentFolderId);
       onRefreshStats();
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     } finally {
       setLoading(false);
+      setUploadProgress(null);
       setActiveVersionFileId(null);
     }
   };
@@ -186,7 +204,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     try {
       await apiRequest(`/files/recycle/file/${id}`, { method: 'POST' });
       fetchContents(currentFolderId);
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -196,7 +214,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     try {
       await apiRequest(`/files/recycle/folder/${id}`, { method: 'POST' });
       fetchContents(currentFolderId);
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -205,7 +223,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     try {
       await apiRequest(`/files/restore/file/${id}`, { method: 'POST' });
       fetchRecycleBin();
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -214,7 +232,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
     try {
       await apiRequest(`/files/restore/folder/${id}`, { method: 'POST' });
       fetchRecycleBin();
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -225,7 +243,7 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
       await apiRequest(`/files/permanent/file/${id}`, { method: 'DELETE' });
       fetchRecycleBin();
       onRefreshStats();
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
@@ -236,450 +254,477 @@ export default function FileCenter({ user, onRefreshStats }: FileCenterProps) {
       await apiRequest(`/files/permanent/folder/${id}`, { method: 'DELETE' });
       fetchRecycleBin();
       onRefreshStats();
-    } catch (e) {
+    } catch (e: any) {
       alert(e.message);
     }
   };
 
-  const handleDownload = async (fileId: number, fileName: string) => {
+  const handleShareSubmit = async () => {
+    if (!activeShareFile || selectedShareUserIds.length === 0) return;
     try {
-      const blob = await apiDownloadBlob(`/files/download/${fileId}`);
+      await apiRequest('/files/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileId: activeShareFile.id,
+          userIds: selectedShareUserIds,
+        }),
+      });
+      alert('File successfully shared!');
+      setShowShareModal(false);
+      setActiveShareFile(null);
+      setSelectedShareUserIds([]);
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
+  const handleDownload = async (file: any) => {
+    try {
+      const blob = await apiDownloadBlob(`/files/download/${file.id}`);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = fileName;
+      a.download = file.name;
       document.body.appendChild(a);
       a.click();
       a.remove();
-    } catch (e) {
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
       alert(e.message);
-    }
-  };
-
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      await uploadFile(e.dataTransfer.files[0]);
     }
   };
 
   const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
   return (
-    <div className="space-y-5 select-none">
-      {/* macOS Finder Toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-6">
+      {/* Header & Sub-navigation */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <HardDrive className="text-primary" size={22} />
-            File Center
-          </h1>
-          <p className="text-xs text-muted-foreground font-medium mt-0.5">
-            Exchange ICT department documents instantly over local intranet.
+          <h1 className="text-xl font-bold tracking-tight">File Center</h1>
+          <p className="text-xs text-muted-foreground font-medium">
+            Centralized Document Management & Institution Storage
           </p>
         </div>
 
-        {/* macOS Segmented Tab Navigation */}
-        <div className="flex items-center gap-3">
-          <div className="apple-segmented-control">
+        <div className="flex items-center gap-2">
+          <div className="p-1 bg-secondary/80 rounded-xl border border-border/60 flex items-center gap-1 text-xs">
             <button
-              onClick={() => fetchContents(null)}
-              className={`apple-segmented-item ${!inRecycleBin && !inSharedView ? 'apple-segmented-item-active' : ''}`}
+              onClick={() => setActiveView('my-files')}
+              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                activeView === 'my-files'
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
               My Files
             </button>
+
             <button
-              onClick={fetchSharedWithMe}
-              className={`apple-segmented-item ${inSharedView ? 'apple-segmented-item-active' : ''}`}
+              onClick={() => setActiveView('shared')}
+              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                activeView === 'shared'
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
               Shared with Me
             </button>
+
             <button
-              onClick={fetchRecycleBin}
-              className={`apple-segmented-item ${inRecycleBin ? 'apple-segmented-item-active' : ''}`}
+              onClick={() => setActiveView('recycle')}
+              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                activeView === 'recycle'
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
               Recycle Bin
             </button>
           </div>
 
-          {!inRecycleBin && !inSharedView && (
+          {activeView === 'my-files' && (
             <div className="flex items-center gap-2">
               <button
-                onClick={handleCreateFolder}
-                className="apple-button-secondary text-xs"
+                onClick={() => setShowNewFolderModal(true)}
+                className="apple-button-secondary text-xs flex items-center gap-1.5"
               >
                 <FolderPlus size={14} />
                 New Folder
               </button>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="apple-button text-xs"
-              >
+
+              <label className="apple-button text-xs flex items-center gap-1.5 cursor-pointer">
                 <Upload size={14} />
-                Upload
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <input
-                type="file"
-                ref={versionInputRef}
-                onChange={handleUploadVersion}
-                className="hidden"
-              />
+                Upload File
+                <input
+                  type="file"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
             </div>
           )}
         </div>
       </div>
 
-      {/* macOS Breadcrumb Trail */}
-      {!inRecycleBin && !inSharedView && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground py-1 px-1">
-          <span
-            onClick={() => setCurrentFolderId(null)}
-            className="hover:text-primary cursor-pointer font-medium"
-          >
-            Root
-          </span>
-          {breadcrumbs.map((crumb) => (
-            <React.Fragment key={crumb.id}>
-              <span>/</span>
-              <span
-                onClick={() => setCurrentFolderId(crumb.id)}
-                className="hover:text-primary cursor-pointer font-medium truncate max-w-[120px]"
-              >
-                {crumb.name}
-              </span>
-            </React.Fragment>
-          ))}
+      {/* Floating Upload Progress Card */}
+      {uploadProgress !== null && (
+        <div className="fixed bottom-6 right-6 z-50 apple-card p-4 shadow-2xl border border-primary/30 bg-background/95 backdrop-blur-xl w-72 space-y-2 animate-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className="truncate">Uploading Document...</span>
+            <span className="text-primary font-mono">{uploadProgress}%</span>
+          </div>
+          <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-150 ease-out"
+              style={{ width: `${uploadProgress}%` }}
+            ></div>
+          </div>
         </div>
       )}
 
-      {/* Drag & Drop Main Viewport */}
-      <div
-        onDragEnter={handleDrag}
-        onDragOver={handleDrag}
-        onDragLeave={handleDrag}
-        onDrop={handleDrop}
-        className={`relative flex flex-col min-h-[420px] rounded-2xl p-6 transition-all border-2 border-dashed ${
-          dragActive
-            ? 'border-primary bg-primary/5'
-            : 'border-border/60 bg-card/50'
-        }`}
-      >
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10 rounded-2xl backdrop-blur-xs">
-            <span className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin"></span>
+      {/* MAIN FILES VIEW */}
+      {activeView === 'my-files' && (
+        <div className="space-y-4">
+          {/* Breadcrumb Path */}
+          <div className="flex items-center gap-1 text-xs text-muted-foreground bg-secondary/30 p-2.5 rounded-xl border border-border/40 overflow-x-auto">
+            <Home size={14} className="shrink-0" />
+            {breadcrumbs.map((crumb, idx) => (
+              <React.Fragment key={idx}>
+                <ChevronRight size={12} className="shrink-0 text-muted-foreground/60" />
+                <button
+                  onClick={() => handleBreadcrumbClick(idx)}
+                  className={`hover:text-primary transition-all truncate ${
+                    idx === breadcrumbs.length - 1 ? 'font-bold text-foreground' : ''
+                  }`}
+                >
+                  {crumb.name}
+                </button>
+              </React.Fragment>
+            ))}
           </div>
-        )}
 
-        {inRecycleBin ? (
-          /* Recycle Bin View */
-          <div className="space-y-5">
-            <h2 className="text-xs font-semibold text-destructive uppercase tracking-wider flex items-center gap-2">
-              <Trash2 size={16} />
-              Recycle Bin
-            </h2>
-
-            {recycledFolders.length === 0 && recycledFiles.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
-                <Trash2 size={40} className="stroke-[1.2] mb-2 opacity-50" />
-                <p className="text-xs font-semibold">Recycle Bin is empty</p>
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {recycledFolders.map((fol) => (
-                  <div key={fol.id} className="apple-card p-3.5 flex items-center justify-between">
-                    <div className="flex items-center gap-3 truncate">
-                      <Folder className="text-amber-500 fill-amber-500/20 shrink-0" size={20} />
-                      <span className="font-medium text-xs truncate">{fol.name}</span>
-                    </div>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => handleRestoreFolder(fol.id)}
-                        className="p-1.5 hover:bg-secondary text-emerald-500 rounded-lg transition-all"
-                        title="Restore"
+          {loading ? (
+            <div className="py-16 text-center text-xs text-muted-foreground">
+              <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin inline-block mb-2"></span>
+              <p>Loading files...</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Folders Grid */}
+              {folders.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Folders</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {folders.map((fol) => (
+                      <div
+                        key={fol.id}
+                        onClick={() => handleOpenFolder(fol)}
+                        className="apple-card p-3 rounded-2xl border border-border/60 hover:border-primary/50 transition-all cursor-pointer flex items-center justify-between group"
                       >
-                        <RotateCcw size={14} />
-                      </button>
-                      <button
-                        onClick={() => handlePermanentDeleteFolder(fol.id)}
-                        className="p-1.5 hover:bg-secondary text-destructive rounded-lg transition-all"
-                        title="Delete Permanently"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {recycledFiles.map((fi) => (
-                  <div key={fi.id} className="apple-card p-3.5 flex items-center justify-between">
-                    <div className="flex items-center gap-3 truncate">
-                      <FileText className="text-primary shrink-0" size={20} />
-                      <div className="truncate">
-                        <p className="font-semibold text-xs truncate">{fi.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{formatBytes(fi.size)}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => handleRestoreFile(fi.id)}
-                        className="p-1.5 hover:bg-secondary text-emerald-500 rounded-lg transition-all"
-                        title="Restore"
-                      >
-                        <RotateCcw size={14} />
-                      </button>
-                      <button
-                        onClick={() => handlePermanentDeleteFile(fi.id)}
-                        className="p-1.5 hover:bg-secondary text-destructive rounded-lg transition-all"
-                        title="Delete Permanently"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : inSharedView ? (
-          /* Shared with Me View */
-          <div className="space-y-5 flex-1">
-            <h2 className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
-              <Share2 size={16} />
-              Files Received (Shared with Me)
-            </h2>
-
-            {sharedFiles.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center py-24 text-muted-foreground">
-                <FileText size={40} className="stroke-[1.2] mb-2 opacity-50" />
-                <p className="text-xs font-semibold">No files shared with you yet</p>
-              </div>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {sharedFiles.map((file) => (
-                  <div
-                    key={file.id}
-                    className="apple-card p-4 flex flex-col justify-between group"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 truncate">
-                          <FileText className="text-primary shrink-0" size={18} />
-                          <h4 className="font-semibold text-xs truncate" title={file.name}>
-                            {file.name}
-                          </h4>
+                        <div className="flex items-center gap-3 truncate">
+                          <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                            <Folder size={18} />
+                          </div>
+                          <div className="truncate">
+                            <h4 className="text-xs font-semibold truncate group-hover:text-primary">{fol.name}</h4>
+                            <span className="text-[10px] text-muted-foreground">{fol.createdByUser?.fullName || 'Folder'}</span>
+                          </div>
                         </div>
-                        <span className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full uppercase shrink-0">
-                          v{file.versions?.length || 1}
-                        </span>
-                      </div>
-                      <div className="mt-3 text-[11px] text-muted-foreground space-y-0.5">
-                        <p>Size: {formatBytes(file.size)}</p>
-                        <p>Sender: {file.createdBy?.fullName}</p>
-                        <p>Received: {new Date(file.createdAt).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-border/40 flex justify-end">
-                      <button
-                        onClick={() => handleDownload(file.id, file.name)}
-                        className="p-1.5 text-muted-foreground hover:text-primary rounded-lg hover:bg-secondary transition-all"
-                        title="Download"
-                      >
-                        <Download size={14} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          /* Standard Finder View */
-          <div className="flex-1 flex flex-col">
-            {folders.length === 0 && files.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center py-24 text-muted-foreground">
-                <Upload size={40} className="stroke-[1.2] mb-2 opacity-50 animate-bounce" />
-                <p className="text-xs font-semibold">Drag files here, or click Upload above</p>
-                <p className="text-[10px] mt-1 text-muted-foreground/60">LAN File Limit: 50MB per file</p>
-              </div>
-            ) : (
-              <div className="space-y-6 flex-1">
-                {/* Folders Section */}
-                {folders.length > 0 && (
-                  <div>
-                    <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3 px-1">Folders</h3>
-                    <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-                      {folders.map((folder) => (
-                        <div
-                          key={folder.id}
-                          className="apple-card p-3.5 flex items-center justify-between group cursor-pointer"
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRecycleFolder(fol.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-destructive/10 text-destructive rounded-lg transition-all"
+                          title="Recycle Folder"
                         >
-                          <div
-                            onClick={() => setCurrentFolderId(folder.id)}
-                            className="flex items-center gap-3 truncate flex-1 pr-2"
-                          >
-                            <Folder className="text-amber-500 fill-amber-500/20 shrink-0" size={20} />
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Files Grid */}
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Files</h3>
+                {files.length === 0 ? (
+                  <div className="apple-card p-10 text-center text-xs text-muted-foreground border-dashed">
+                    No files found in this directory. Click "Upload File" above to add documents.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {files.map((file) => (
+                      <div
+                        key={file.id}
+                        className="apple-card p-4 rounded-2xl border border-border/60 hover:border-primary/40 transition-all space-y-3 relative group"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 truncate">
+                            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold">
+                              <File size={16} />
+                            </div>
                             <div className="truncate">
-                              <p className="font-semibold text-xs truncate">{folder.name}</p>
-                              <p className="text-[9px] text-muted-foreground">
-                                By: {folder.createdBy?.fullName}
-                              </p>
+                              <h4 className="text-xs font-bold truncate">{file.name}</h4>
+                              <span className="text-[10px] text-muted-foreground block">{formatBytes(file.sizeBytes)} • v{file.versions?.length || 1}</span>
                             </div>
                           </div>
+                        </div>
+
+                        <div className="text-[10px] text-muted-foreground flex items-center justify-between border-t border-border/40 pt-2">
+                          <span>Owner: {file.createdByUser?.fullName}</span>
+                          <span>{new Date(file.updatedAt).toLocaleDateString()}</span>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-1 pt-1 border-t border-border/40">
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRecycleFolder(folder.id);
+                            onClick={() => handleDownload(file)}
+                            className="flex-1 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all"
+                          >
+                            <Download size={13} />
+                            Download
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setActiveShareFile(file);
+                              setShowShareModal(true);
                             }}
-                            className="p-1 text-muted-foreground hover:text-destructive rounded-lg hover:bg-secondary opacity-0 group-hover:opacity-100 transition-all shrink-0"
-                            title="Recycle"
+                            className="p-1.5 hover:bg-secondary rounded-lg text-muted-foreground hover:text-foreground"
+                            title="Share File"
+                          >
+                            <Share2 size={13} />
+                          </button>
+
+                          <label className="p-1.5 hover:bg-secondary rounded-lg text-muted-foreground hover:text-foreground cursor-pointer" title="Upload New Version">
+                            <Upload size={13} />
+                            <input
+                              type="file"
+                              onChange={(e) => {
+                                setActiveVersionFileId(file.id);
+                                handleUploadVersion(e);
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+
+                          <button
+                            onClick={() => handleRecycleFile(file.id)}
+                            className="p-1.5 hover:bg-destructive/10 text-destructive rounded-lg transition-all"
+                            title="Recycle File"
                           >
                             <Trash2 size={13} />
                           </button>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Files Section */}
-                {files.length > 0 && (
-                  <div>
-                    <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3 px-1">Files</h3>
-                    <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                      {files.map((file) => (
-                        <div
-                          key={file.id}
-                          className="apple-card p-4 flex flex-col justify-between group"
-                        >
-                          <div>
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2 truncate">
-                                <FileText className="text-primary shrink-0" size={18} />
-                                <h4 className="font-semibold text-xs truncate" title={file.name}>
-                                  {file.name}
-                                </h4>
-                              </div>
-                              <span className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full uppercase shrink-0">
-                                v{file.versions?.length || 1}
-                              </span>
-                            </div>
-                            <div className="mt-3 text-[11px] text-muted-foreground space-y-0.5">
-                              <p>Size: {formatBytes(file.size)}</p>
-                              <p>Owner: {file.createdBy?.fullName}</p>
-                              <p>Date: {new Date(file.createdAt).toLocaleDateString()}</p>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between">
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => {
-                                  setActiveVersionFileId(file.id);
-                                  versionInputRef.current?.click();
-                                }}
-                                className="text-[11px] font-semibold text-primary hover:underline flex items-center gap-0.5"
-                              >
-                                <Plus size={11} />
-                                Version
-                              </button>
-                              <button
-                                onClick={() => triggerShareModal(file.id)}
-                                className="text-[11px] font-semibold text-primary hover:underline"
-                              >
-                                Share
-                              </button>
-                            </div>
-                            <div className="flex gap-0.5">
-                              <button
-                                onClick={() => handleDownload(file.id, file.name)}
-                                className="p-1.5 text-muted-foreground hover:text-primary rounded-lg hover:bg-secondary transition-all"
-                                title="Download"
-                              >
-                                <Download size={13} />
-                              </button>
-                              <button
-                                onClick={() => handleRecycleFile(file.id)}
-                                className="p-1.5 text-muted-foreground hover:text-destructive rounded-lg hover:bg-secondary transition-all"
-                                title="Recycle"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Share Document Modal */}
-      {showShareModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md">
-          <div className="apple-card w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <h3 className="text-base font-bold">Share Document</h3>
-            <p className="text-xs text-muted-foreground">Select a department colleague to share this file with.</p>
-            
-            <div className="max-h-[180px] overflow-y-auto border border-border/60 rounded-xl p-2 space-y-1 bg-secondary/30">
-              {users.length === 0 ? (
-                <p className="text-xs text-muted-foreground p-4 text-center">No other staff members registered.</p>
-              ) : (
-                users.map((u) => (
-                  <div
-                    key={u.id}
-                    onClick={() => handleShareSubmit(u.id)}
-                    className="flex items-center justify-between p-2.5 hover:bg-secondary rounded-lg cursor-pointer transition-all border border-transparent hover:border-border/60"
-                  >
-                    <div>
-                      <div className="text-xs font-semibold">{u.fullName}</div>
-                      <div className="text-[10px] text-muted-foreground">@{u.username}</div>
-                    </div>
-                    <span className="text-[10px] font-bold text-primary">Share</span>
-                  </div>
-                ))
-              )}
             </div>
+          )}
+        </div>
+      )}
 
-            <div className="flex justify-end pt-2 border-t border-border/40">
-              <button
-                onClick={() => {
-                  setShowShareModal(false);
-                  setShareFileId(null);
-                }}
-                className="apple-button-secondary text-xs"
-              >
-                Cancel
+      {/* SHARED WITH ME VIEW */}
+      {activeView === 'shared' && (
+        <div className="space-y-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Files Shared With You</h3>
+          {sharedWithMeFiles.length === 0 ? (
+            <div className="apple-card p-10 text-center text-xs text-muted-foreground">
+              No files have been shared with you yet.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {sharedWithMeFiles.map((item) => {
+                const file = item.file;
+                return (
+                  <div key={item.id} className="apple-card p-4 space-y-3 border border-border/60">
+                    <div className="flex items-center gap-2.5 truncate">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0 font-bold">
+                        <File size={16} />
+                      </div>
+                      <div className="truncate">
+                        <h4 className="text-xs font-bold truncate">{file.name}</h4>
+                        <span className="text-[10px] text-muted-foreground">{formatBytes(file.sizeBytes)}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] text-muted-foreground border-t border-border/40 pt-2">
+                      Shared by: <span className="font-semibold text-foreground">{file.createdByUser?.fullName}</span>
+                    </div>
+
+                    <button
+                      onClick={() => handleDownload(file)}
+                      className="w-full py-1.5 bg-primary text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-primary/90 transition-all"
+                    >
+                      <Download size={13} />
+                      Download Shared File
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* RECYCLE BIN VIEW */}
+      {activeView === 'recycle' && (
+        <div className="space-y-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Recycle Bin Items</h3>
+          {recycleFiles.length === 0 && recycleFolders.length === 0 ? (
+            <div className="apple-card p-10 text-center text-xs text-muted-foreground">
+              Recycle bin is empty.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {recycleFolders.map((fol) => (
+                <div key={fol.id} className="apple-card p-3 flex items-center justify-between border border-border/60">
+                  <div className="flex items-center gap-3">
+                    <Folder size={18} className="text-amber-500" />
+                    <div>
+                      <h4 className="text-xs font-semibold">{fol.name}</h4>
+                      <span className="text-[10px] text-muted-foreground">Recycled Folder</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleRestoreFolder(fol.id)}
+                      className="apple-button-secondary text-xs flex items-center gap-1"
+                    >
+                      <RotateCcw size={12} />
+                      Restore
+                    </button>
+                    <button
+                      onClick={() => handlePermanentDeleteFolder(fol.id)}
+                      className="p-2 text-destructive hover:bg-destructive/10 rounded-lg text-xs"
+                      title="Permanently Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {recycleFiles.map((file) => (
+                <div key={file.id} className="apple-card p-3 flex items-center justify-between border border-border/60">
+                  <div className="flex items-center gap-3">
+                    <File size={18} className="text-primary" />
+                    <div>
+                      <h4 className="text-xs font-semibold">{file.name}</h4>
+                      <span className="text-[10px] text-muted-foreground">{formatBytes(file.sizeBytes)}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleRestoreFile(file.id)}
+                      className="apple-button-secondary text-xs flex items-center gap-1"
+                    >
+                      <RotateCcw size={12} />
+                      Restore
+                    </button>
+                    <button
+                      onClick={() => handlePermanentDeleteFile(file.id)}
+                      className="p-2 text-destructive hover:bg-destructive/10 rounded-lg text-xs"
+                      title="Permanently Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* NEW FOLDER MODAL */}
+      {showNewFolderModal && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="apple-card max-w-sm w-full p-6 space-y-4 shadow-2xl border border-border">
+            <h3 className="text-sm font-bold">Create New Folder</h3>
+            <form onSubmit={handleCreateFolderSubmit} className="space-y-3">
+              <input
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="Folder Name"
+                required
+                className="apple-input w-full"
+              />
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewFolderModal(false)}
+                  className="apple-button-secondary text-xs"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="apple-button text-xs">
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SHARE FILE MODAL */}
+      {showShareModal && activeShareFile && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="apple-card max-w-md w-full p-6 space-y-4 shadow-2xl border border-border">
+            <div className="flex items-center justify-between border-b border-border/40 pb-3">
+              <h3 className="text-sm font-bold">Share "{activeShareFile.name}"</h3>
+              <button onClick={() => setShowShareModal(false)} className="text-muted-foreground hover:text-foreground">
+                <X size={16} />
               </button>
             </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Select Colleagues</label>
+              <div className="max-h-48 overflow-y-auto space-y-1.5 border border-border/40 rounded-xl p-2 bg-secondary/30">
+                {allUsers.map((u) => {
+                  const isSelected = selectedShareUserIds.includes(u.id);
+                  return (
+                    <div
+                      key={u.id}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedShareUserIds(selectedShareUserIds.filter((id) => id !== u.id));
+                        } else {
+                          setSelectedShareUserIds([...selectedShareUserIds, u.id]);
+                        }
+                      }}
+                      className={`p-2 rounded-lg text-xs flex items-center justify-between cursor-pointer transition-all ${
+                        isSelected ? 'bg-primary text-white font-medium' : 'hover:bg-secondary text-foreground'
+                      }`}
+                    >
+                      <span>{u.fullName} (@{u.username})</span>
+                      {isSelected && <Check size={14} />}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              onClick={handleShareSubmit}
+              disabled={selectedShareUserIds.length === 0}
+              className="apple-button w-full py-2.5 text-xs font-semibold mt-2"
+            >
+              Share File
+            </button>
           </div>
         </div>
       )}

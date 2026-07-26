@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   HardDrive,
@@ -19,6 +19,13 @@ import {
   Moon,
   Menu,
   Bell,
+  Phone,
+  Video,
+  Mic,
+  MicOff,
+  VideoOff,
+  PhoneOff,
+  Check,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
@@ -95,6 +102,34 @@ export default function Home() {
       return () => clearTimeout(timer);
     }
   }, [toastNotification]);
+
+  // --- Global WebRTC Call State Across All Pages ---
+  const [globalCall, setGlobalCall] = useState<{
+    isInCall: boolean;
+    callType: 'audio' | 'video';
+    channelId: number;
+    caller?: any;
+    offer?: any;
+    isIncoming: boolean;
+  } | null>(null);
+
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isCamOff, setIsCamOff] = useState(false);
+  const [showMeetingNotes, setShowMeetingNotes] = useState(false);
+  const [meetingNotesText, setMeetingNotesText] = useState('');
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+
+  // Request browser Notification permissions on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // Mobile drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -285,14 +320,226 @@ export default function Home() {
       }
     };
 
+    // --- Global WebRTC Call Socket Handlers ---
+    const handleIncomingCall = (data: any) => {
+      if (data.caller?.id !== user.id) {
+        setGlobalCall({
+          isInCall: false,
+          callType: data.callType,
+          channelId: data.channelId,
+          caller: data.caller,
+          offer: data.offer,
+          isIncoming: true,
+        });
+
+        // Trigger Web Notification if tab is minimized
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification(`Incoming ${data.callType === 'video' ? 'Video Meeting' : 'Audio Call'}`, {
+            body: `${data.caller?.fullName || 'A colleague'} is calling you on OfficeConnect`,
+            icon: '/logo.png',
+          });
+        }
+      }
+    };
+
+    const handleCallAccepted = async (data: any) => {
+      if (peerConnectionRef.current && data.answer) {
+        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+      }
+    };
+
+    const handleIceCandidateReceived = async (data: any) => {
+      if (peerConnectionRef.current && data.candidate) {
+        try {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+
+    const handleCallEnded = () => {
+      cleanUpCall();
+    };
+
+    const handleCallRejected = () => {
+      cleanUpCall();
+    };
+
     socket.on('messageNotification', handleNotification);
     socket.on('fileSharedNotification', handleFileShared);
+    socket.on('incomingCall', handleIncomingCall);
+    socket.on('callAccepted', handleCallAccepted);
+    socket.on('iceCandidate', handleIceCandidateReceived);
+    socket.on('callEnded', handleCallEnded);
+    socket.on('callRejected', handleCallRejected);
 
     return () => {
       socket.off('messageNotification', handleNotification);
       socket.off('fileSharedNotification', handleFileShared);
+      socket.off('incomingCall', handleIncomingCall);
+      socket.off('callAccepted', handleCallAccepted);
+      socket.off('iceCandidate', handleIceCandidateReceived);
+      socket.off('callEnded', handleCallEnded);
+      socket.off('callRejected', handleCallRejected);
     };
   }, [user]);
+
+  // Global WebRTC getUserMedia Helper
+  const getUserMediaStream = async (type: 'audio' | 'video'): Promise<MediaStream> => {
+    if (
+      typeof window === 'undefined' ||
+      (!navigator.mediaDevices &&
+        !(navigator as any).getUserMedia &&
+        !(navigator as any).webkitGetUserMedia &&
+        !(navigator as any).mozGetUserMedia)
+    ) {
+      throw new Error(
+        'WebRTC Audio/Video calls require HTTPS when accessed over LAN IP address (e.g. https://192.168.1.50). Browsers restrict camera/mic access over HTTP on non-localhost IPs.'
+      );
+    }
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      return navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' });
+    }
+
+    const legacyGetUserMedia =
+      (navigator as any).getUserMedia ||
+      (navigator as any).webkitGetUserMedia ||
+      (navigator as any).mozGetUserMedia;
+
+    return new Promise<MediaStream>((resolve, reject) => {
+      legacyGetUserMedia.call(navigator, { audio: true, video: type === 'video' }, resolve, reject);
+    });
+  };
+
+  const acceptGlobalCall = async () => {
+    if (!globalCall || !globalCall.offer) return;
+    try {
+      const type = globalCall.callType;
+      const stream = await getUserMediaStream(type);
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        if (remoteVideoRef.current && event.streams[0]) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const socket = getSocket();
+          socket.emit('iceCandidate', {
+            channelId: globalCall.channelId,
+            candidate: event.candidate,
+          });
+        }
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(globalCall.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      const socket = getSocket();
+      socket.emit('answerCall', {
+        channelId: globalCall.channelId,
+        answer,
+      });
+
+      setGlobalCall({
+        ...globalCall,
+        isInCall: true,
+        isIncoming: false,
+      });
+    } catch (err: any) {
+      alert('Could not answer call: ' + err.message);
+    }
+  };
+
+  const rejectGlobalCall = () => {
+    if (globalCall) {
+      const socket = getSocket();
+      socket.emit('rejectCall', { channelId: globalCall.channelId });
+    }
+    cleanUpCall();
+  };
+
+  const endGlobalCall = () => {
+    if (globalCall) {
+      const socket = getSocket();
+      socket.emit('endCall', { channelId: globalCall.channelId });
+    }
+    cleanUpCall();
+  };
+
+  const cleanUpCall = () => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+
+    setGlobalCall(null);
+    setIsMicMuted(false);
+    setIsCamOff(false);
+    setShowMeetingNotes(false);
+  };
+
+  const toggleMic = () => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMicMuted(!audioTrack.enabled);
+      }
+    }
+  };
+
+  const toggleCam = () => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsCamOff(!videoTrack.enabled);
+      }
+    }
+  };
+
+  const saveMeetingNotes = async () => {
+    if (!meetingNotesText.trim()) return;
+    setIsSavingNotes(true);
+    try {
+      await apiRequest('/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: `Meeting Minutes: (${new Date().toLocaleDateString()})`,
+          content: meetingNotesText,
+          isPinned: true,
+        }),
+      });
+      alert('Meeting Minutes saved directly to Notes Workspace!');
+      setShowMeetingNotes(false);
+      setMeetingNotesText('');
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
 
   // Global search debounce
   useEffect(() => {
@@ -722,6 +969,7 @@ export default function Home() {
               </button>
             </div>
           )}
+
           {/* Global Search Overlay */}
           {showSearchModal && searchResults && (
             <div className="absolute inset-0 bg-background/95 backdrop-blur-xl z-30 p-6 overflow-y-auto">
@@ -865,6 +1113,168 @@ export default function Home() {
           {activeTab === 'settings' && <Settings />}
         </main>
       </div>
+
+      {/* --- GLOBAL INCOMING CALL RINGING MODAL (Works across all pages) --- */}
+      {globalCall?.isIncoming && (
+        <div className="fixed inset-0 bg-background/90 backdrop-blur-xl z-50 flex items-center justify-center p-4">
+          <div className="apple-card max-w-sm w-full p-6 text-center space-y-6 border border-primary/30 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="relative inline-block">
+              <div className="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl font-bold mx-auto border-2 border-primary/40">
+                {globalCall.caller?.fullName?.charAt(0) || 'U'}
+              </div>
+              <span className="absolute bottom-0 right-0 w-5 h-5 bg-emerald-500 rounded-full border-2 border-background animate-pulse"></span>
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-foreground">{globalCall.caller?.fullName}</h3>
+              <p className="text-xs text-muted-foreground font-medium">
+                Incoming {globalCall.callType === 'video' ? 'Video Meeting' : 'Audio Call'}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-4 pt-2">
+              <button
+                onClick={rejectGlobalCall}
+                className="w-12 h-12 rounded-full bg-destructive text-white flex items-center justify-center hover:bg-destructive/90 transition-all shadow-md cursor-pointer"
+                title="Decline"
+              >
+                <PhoneOff size={20} />
+              </button>
+
+              <button
+                onClick={acceptGlobalCall}
+                className="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition-all shadow-md animate-bounce cursor-pointer"
+                title="Accept Call"
+              >
+                {globalCall.callType === 'video' ? <Video size={20} /> : <Phone size={20} />}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- GLOBAL ACTIVE AUDIO/VIDEO MEETING OVERLAY --- */}
+      {globalCall?.isInCall && (
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl z-50 flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="p-4 flex items-center justify-between border-b border-white/10 text-white">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-xs font-bold tracking-wide">
+                {globalCall.callType === 'video' ? 'Live Video Meeting' : 'Live Audio Call'}
+              </span>
+            </div>
+
+            <button
+              onClick={() => setShowMeetingNotes(!showMeetingNotes)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                showMeetingNotes
+                  ? 'bg-white text-black border-white'
+                  : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+              }`}
+            >
+              <FileText size={14} />
+              {showMeetingNotes ? 'Hide Minutes' : 'Take Meeting Minutes'}
+            </button>
+          </div>
+
+          {/* Main Call Viewport & Meeting Notes Side Panel */}
+          <div className="flex-1 flex overflow-hidden relative">
+            {/* Video Streams Container */}
+            <div className="flex-1 relative flex items-center justify-center p-4">
+              {/* Remote Video Stream */}
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-contain rounded-2xl bg-zinc-900 border border-white/10 shadow-2xl"
+              />
+
+              {/* Local Video Stream (Picture in Picture) */}
+              {globalCall.callType === 'video' && (
+                <div className="absolute bottom-6 right-6 w-36 sm:w-48 h-28 sm:h-36 rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl bg-zinc-800">
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  {isCamOff && (
+                    <div className="absolute inset-0 bg-zinc-900 flex items-center justify-center text-white/50">
+                      <VideoOff size={24} />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Meeting Minutes Drawer Side Panel */}
+            {showMeetingNotes && (
+              <div className="w-full sm:w-80 absolute sm:relative inset-0 sm:inset-auto border-l border-white/10 bg-zinc-900/95 backdrop-blur-xl p-4 flex flex-col space-y-3 z-10 text-white">
+                <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText size={14} />
+                    Meeting Minutes
+                  </h4>
+                  <button onClick={() => setShowMeetingNotes(false)} className="text-white/60 hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <textarea
+                  value={meetingNotesText}
+                  onChange={(e) => setMeetingNotesText(e.target.value)}
+                  placeholder="Record meeting notes, decisions, and action items here..."
+                  className="flex-1 bg-zinc-800/80 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-white/40 resize-none focus:outline-none focus:border-primary"
+                ></textarea>
+
+                <button
+                  onClick={saveMeetingNotes}
+                  disabled={isSavingNotes || !meetingNotesText.trim()}
+                  className="w-full py-2.5 bg-primary text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 hover:bg-primary/90 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Check size={14} />
+                  {isSavingNotes ? 'Saving...' : 'Save to Notes Workspace'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Control Bar Footer */}
+          <div className="p-4 border-t border-white/10 flex items-center justify-center gap-4 bg-zinc-950/80">
+            <button
+              onClick={toggleMic}
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                isMicMuted ? 'bg-destructive text-white' : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+              title={isMicMuted ? 'Unmute Mic' : 'Mute Mic'}
+            >
+              {isMicMuted ? <MicOff size={20} /> : <Mic size={20} />}
+            </button>
+
+            {globalCall.callType === 'video' && (
+              <button
+                onClick={toggleCam}
+                className={`w-12 h-12 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                  isCamOff ? 'bg-destructive text-white' : 'bg-white/10 text-white hover:bg-white/20'
+                }`}
+                title={isCamOff ? 'Turn Camera On' : 'Turn Camera Off'}
+              >
+                {isCamOff ? <VideoOff size={20} /> : <Video size={20} />}
+              </button>
+            )}
+
+            <button
+              onClick={endGlobalCall}
+              className="w-14 h-14 rounded-full bg-destructive text-white flex items-center justify-center hover:bg-destructive/90 transition-all shadow-xl cursor-pointer"
+              title="End Call"
+            >
+              <PhoneOff size={24} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
