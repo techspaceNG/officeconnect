@@ -14,13 +14,21 @@ export class LettersService {
     }
   }
 
-  async create(title: string, content: string, userId: number): Promise<OfficialLetter> {
+  async create(title: string, content: string, userId: number, recipientId?: number, attachmentPath?: string): Promise<OfficialLetter> {
     return this.prisma.officialLetter.create({
       data: {
         title,
         content,
         createdById: userId,
+        recipientId: recipientId || null,
+        approverId: recipientId || null,
+        attachmentPath: attachmentPath || null,
         status: LetterStatus.DRAFT,
+      },
+      include: {
+        createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
+        approver: { select: { id: true, username: true, fullName: true } },
       },
     });
   }
@@ -30,15 +38,24 @@ export class LettersService {
       return this.prisma.officialLetter.findMany({
         include: {
           createdBy: { select: { id: true, username: true, fullName: true } },
+          recipient: { select: { id: true, username: true, fullName: true } },
           approver: { select: { id: true, username: true, fullName: true } },
         },
         orderBy: { createdAt: 'desc' },
       });
     }
+
     return this.prisma.officialLetter.findMany({
-      where: { createdById: userId },
+      where: {
+        OR: [
+          { createdById: userId },
+          { recipientId: userId },
+          { approverId: userId },
+        ],
+      },
       include: {
         createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
         approver: { select: { id: true, username: true, fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -50,13 +67,20 @@ export class LettersService {
       where: { id },
       include: {
         createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
         approver: { select: { id: true, username: true, fullName: true } },
       },
     });
     if (!letter) {
       throw new NotFoundException('Letter not found');
     }
-    if (role !== Role.SUPER_ADMIN && role !== Role.DIRECTOR && letter.createdById !== userId) {
+    if (
+      role !== Role.SUPER_ADMIN &&
+      role !== Role.DIRECTOR &&
+      letter.createdById !== userId &&
+      letter.recipientId !== userId &&
+      letter.approverId !== userId
+    ) {
       throw new ForbiddenException('Access denied');
     }
     return letter;
@@ -75,27 +99,74 @@ export class LettersService {
       data: {
         title: data.title,
         content: data.content,
+        recipientId: data.recipientId !== undefined ? data.recipientId : letter.recipientId,
+        approverId: data.recipientId !== undefined ? data.recipientId : letter.approverId,
+        attachmentPath: data.attachmentPath || letter.attachmentPath,
         status: LetterStatus.DRAFT, // Reset status to draft on edit
+      },
+      include: {
+        createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
+        approver: { select: { id: true, username: true, fullName: true } },
       },
     });
   }
 
-  async submitForApproval(id: number, userId: number): Promise<OfficialLetter> {
+  async submitForApproval(id: number, userId: number, recipientId?: number): Promise<OfficialLetter> {
     const letter = await this.prisma.officialLetter.findUnique({ where: { id } });
     if (!letter) throw new NotFoundException('Letter not found');
     if (letter.createdById !== userId) throw new ForbiddenException('Not your letter');
-    if (letter.status !== LetterStatus.DRAFT && letter.status !== LetterStatus.REJECTED) {
+    if (letter.status !== LetterStatus.DRAFT && letter.status !== LetterStatus.REJECTED && letter.status !== LetterStatus.NEEDS_REVISION) {
       throw new BadRequestException('Letter is already submitted or approved');
+    }
+
+    const targetRecipientId = recipientId || letter.recipientId;
+
+    return this.prisma.officialLetter.update({
+      where: { id },
+      data: {
+        status: LetterStatus.PENDING_APPROVAL,
+        recipientId: targetRecipientId,
+        approverId: targetRecipientId,
+      },
+      include: {
+        createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
+        approver: { select: { id: true, username: true, fullName: true } },
+      },
+    });
+  }
+
+  async requestRevision(id: number, remarks: string, reviewerId: number): Promise<OfficialLetter> {
+    const letter = await this.prisma.officialLetter.findUnique({ where: { id } });
+    if (!letter) throw new NotFoundException('Letter not found');
+    if (letter.status !== LetterStatus.PENDING_APPROVAL) {
+      throw new BadRequestException('Letter is not pending approval');
     }
 
     return this.prisma.officialLetter.update({
       where: { id },
-      data: { status: LetterStatus.PENDING_APPROVAL },
+      data: {
+        status: LetterStatus.NEEDS_REVISION,
+        remarks: remarks || 'Please adjust correspondence based on supervisor feedback.',
+        approverId: reviewerId,
+      },
+      include: {
+        createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
+        approver: { select: { id: true, username: true, fullName: true } },
+      },
     });
   }
 
-  async approve(id: number, approverId: number): Promise<OfficialLetter> {
-    const letter = await this.prisma.officialLetter.findUnique({ where: { id } });
+  async approve(id: number, approverId: number, remarks?: string): Promise<OfficialLetter> {
+    const letter = await this.prisma.officialLetter.findUnique({
+      where: { id },
+      include: {
+        createdBy: { select: { fullName: true } },
+        recipient: { select: { fullName: true } },
+      },
+    });
     if (!letter) throw new NotFoundException('Letter not found');
     if (letter.status !== LetterStatus.PENDING_APPROVAL) {
       throw new BadRequestException('Letter is not pending approval');
@@ -130,6 +201,7 @@ export class LettersService {
           .meta td { padding: 4px 0; }
           .meta td.label { font-weight: bold; width: 150px; }
           .content { margin-bottom: 40px; font-size: 16px; min-height: 200px; }
+          .remarks { background: #f0f7ff; border-left: 4px solid #0056b3; padding: 12px 16px; font-size: 14px; margin-bottom: 30px; }
           .footer { margin-top: 50px; border-top: 1px solid #ddd; padding-top: 15px; font-size: 12px; color: #777; }
         </style>
       </head>
@@ -149,6 +221,10 @@ export class LettersService {
               <td>${new Date().toLocaleDateString()}</td>
             </tr>
             <tr>
+              <td class="label">Author:</td>
+              <td>${letter.createdBy?.fullName || 'ICT Staff'}</td>
+            </tr>
+            <tr>
               <td class="label">Subject:</td>
               <td><strong>${letter.title}</strong></td>
             </tr>
@@ -157,8 +233,13 @@ export class LettersService {
         <div class="content">
           ${letter.content.replace(/\n/g, '<br>')}
         </div>
+        ${
+          remarks
+            ? `<div class="remarks"><strong>Approver Remarks:</strong> ${remarks}</div>`
+            : ''
+        }
         <div class="footer">
-          <p>This is a system-generated official letter validated by the ICT Director.</p>
+          <p>This is an official validated correspondence certified by the ICT Department.</p>
         </div>
       </body>
       </html>
@@ -173,6 +254,12 @@ export class LettersService {
         approverId,
         referenceNumber,
         filePath: relativePath,
+        remarks: remarks || letter.remarks,
+      },
+      include: {
+        createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
+        approver: { select: { id: true, username: true, fullName: true } },
       },
     });
   }
@@ -190,6 +277,11 @@ export class LettersService {
         status: LetterStatus.REJECTED,
         approverId,
         rejectionReason,
+      },
+      include: {
+        createdBy: { select: { id: true, username: true, fullName: true } },
+        recipient: { select: { id: true, username: true, fullName: true } },
+        approver: { select: { id: true, username: true, fullName: true } },
       },
     });
   }

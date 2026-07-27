@@ -8,12 +8,17 @@ import {
   UseGuards,
   Request,
   ParseIntPipe,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { LettersService } from './letters.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Controller('letters')
 @UseGuards(JwtAuthGuard)
@@ -21,12 +26,26 @@ export class LettersController {
   constructor(private lettersService: LettersService) {}
 
   @Post()
+  @UseInterceptors(FileInterceptor('attachment'))
   async create(
     @Request() req,
     @Body('title') title: string,
     @Body('content') content: string,
+    @Body('recipientId') recipientIdStr?: string,
+    @UploadedFile() file?: any,
   ) {
-    return this.lettersService.create(title, content, req.user.id);
+    let attachmentPath: string | undefined = undefined;
+    if (file) {
+      const lettersStorage = path.join(process.cwd(), '..', 'storage', 'letters');
+      if (!fs.existsSync(lettersStorage)) fs.mkdirSync(lettersStorage, { recursive: true });
+      const uniqueName = `${Date.now()}-${file.originalname}`;
+      const absPath = path.join(lettersStorage, uniqueName);
+      fs.writeFileSync(absPath, file.buffer);
+      attachmentPath = `letters/${uniqueName}`;
+    }
+
+    const recipientId = recipientIdStr ? parseInt(recipientIdStr, 10) : undefined;
+    return this.lettersService.create(title, content, req.user.id, recipientId, attachmentPath);
   }
 
   @Get()
@@ -40,28 +59,60 @@ export class LettersController {
   }
 
   @Put(':id')
+  @UseInterceptors(FileInterceptor('attachment'))
   async update(
     @Request() req,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: any,
+    @UploadedFile() file?: any,
   ) {
-    return this.lettersService.update(id, body, req.user.id);
+    let attachmentPath: string | undefined = undefined;
+    if (file) {
+      const lettersStorage = path.join(process.cwd(), '..', 'storage', 'letters');
+      if (!fs.existsSync(lettersStorage)) fs.mkdirSync(lettersStorage, { recursive: true });
+      const uniqueName = `${Date.now()}-${file.originalname}`;
+      const absPath = path.join(lettersStorage, uniqueName);
+      fs.writeFileSync(absPath, file.buffer);
+      attachmentPath = `letters/${uniqueName}`;
+    }
+
+    const data = {
+      title: body.title,
+      content: body.content,
+      recipientId: body.recipientId ? parseInt(body.recipientId, 10) : undefined,
+      attachmentPath,
+    };
+
+    return this.lettersService.update(id, data, req.user.id);
   }
 
   @Post(':id/submit')
-  async submitForApproval(@Request() req, @Param('id', ParseIntPipe) id: number) {
-    return this.lettersService.submitForApproval(id, req.user.id);
+  async submitForApproval(
+    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body('recipientId') recipientId?: number,
+  ) {
+    return this.lettersService.submitForApproval(id, req.user.id, recipientId);
   }
 
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.DIRECTOR)
+  @Post(':id/revision')
+  async requestRevision(
+    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body('remarks') remarks: string,
+  ) {
+    return this.lettersService.requestRevision(id, remarks, req.user.id);
+  }
+
   @Post(':id/approve')
-  async approve(@Request() req, @Param('id', ParseIntPipe) id: number) {
-    return this.lettersService.approve(id, req.user.id);
+  async approve(
+    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body('remarks') remarks?: string,
+  ) {
+    return this.lettersService.approve(id, req.user.id, remarks);
   }
 
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.DIRECTOR)
   @Post(':id/reject')
   async reject(
     @Request() req,
