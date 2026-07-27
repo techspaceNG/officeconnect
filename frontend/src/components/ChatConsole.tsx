@@ -151,8 +151,10 @@ export default function ChatConsole({ user, onStartCall }: ChatConsoleProps) {
   // Initiate WebRTC Call via Global Parent Handler
   const initiateCall = (type: 'audio' | 'video') => {
     if (!activeChannel) return;
+    const partner = activeChannel.members?.find((m: any) => (m.id || m.user?.id) !== user.id);
+    const recipientId = partner ? (partner.id || partner.user?.id) : undefined;
     if (onStartCall) {
-      onStartCall(activeChannel.id, type, activeChannel.isGroup);
+      onStartCall(activeChannel.id, type, activeChannel.isGroup, recipientId);
     }
   };
 

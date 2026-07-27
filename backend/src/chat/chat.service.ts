@@ -143,4 +143,15 @@ export class ChatService {
       },
     });
   }
+
+  async getChannelById(channelId: number) {
+    return this.prisma.channel.findUnique({
+      where: { id: channelId },
+      include: {
+        members: {
+          select: { id: true, username: true, fullName: true, role: true },
+        },
+      },
+    });
+  }
 }

@@ -43,6 +43,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       
       client.data.user = payload;
       this.activeUsers.set(payload.sub, client.id);
+      client.join(`user_${payload.sub}`);
 
       // Notify others of online status
       this.server.emit('userStatus', { userId: payload.sub, status: 'online' });
@@ -79,7 +80,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleLeaveChannel(@ConnectedSocket() client: Socket, @MessageBody('channelId') channelId: number) {
     const roomName = `channel_${channelId}`;
     client.leave(roomName);
-    console.log(`Socket Client ${client.id} left room: ${roomName}`);
   }
 
   @SubscribeMessage('sendMessage')
@@ -87,23 +87,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { channelId: number; content: string; attachments?: any[] },
   ) {
-    if (!client.data?.user) return;
-    const senderId = client.data.user.sub;
+    const userId = client.data.user.sub;
     const message = await this.chatService.saveMessage(
       data.channelId,
-      senderId,
+      userId,
       data.content,
       data.attachments,
     );
 
     const roomName = `channel_${data.channelId}`;
     this.server.to(roomName).emit('message', message);
-    
-    // Also notify other members who might not be in the room
-    this.server.emit('messageNotification', {
-      channelId: data.channelId,
-      message,
-    });
+    this.server.emit('messageNotification', { channelId: data.channelId, message });
   }
 
   @SubscribeMessage('typing')
@@ -111,13 +105,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { channelId: number; isTyping: boolean },
   ) {
-    const username = client.data.user.username;
-    const userId = client.data.user.sub;
+    const user = client.data.user;
     const roomName = `channel_${data.channelId}`;
     client.to(roomName).emit('typing', {
       channelId: data.channelId,
-      userId,
-      username,
+      userId: user.sub,
+      username: user.fullName || user.username,
       isTyping: data.isTyping,
     });
   }
@@ -143,7 +136,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('callUser')
   async handleCallUser(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { channelId: number; offer: any; callType: 'audio' | 'video'; isGroup?: boolean },
+    @MessageBody() data: { channelId: number; offer: any; callType: 'audio' | 'video'; isGroup?: boolean; recipientId?: number },
   ) {
     const sender = client.data.user;
     if (!sender) return;
@@ -159,8 +152,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const roomName = `channel_${data.channelId}`;
     this.server.to(roomName).emit('message', callMsg);
 
-    // Broadcast incomingCall globally so users receive ringing alert on any page/tab
-    this.server.emit('incomingCall', {
+    const callPayload = {
       channelId: data.channelId,
       caller: {
         id: sender.sub,
@@ -170,7 +162,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       offer: data.offer,
       callType: data.callType,
       isGroup: !!data.isGroup,
-    });
+    };
+
+    if (data.isGroup) {
+      // Group room call: broadcast to channel members (excluding caller)
+      client.to(roomName).emit('incomingCall', callPayload);
+    } else if (data.recipientId) {
+      // Direct message 1-on-1 call: emit strictly to recipient's personal user room!
+      this.server.to(`user_${data.recipientId}`).emit('incomingCall', callPayload);
+    } else {
+      // Look up channel members and emit strictly to members except sender
+      const channel = await this.chatService.getChannelById(data.channelId);
+      if (channel) {
+        channel.members.forEach((m) => {
+          if (m.id !== sender.sub) {
+            this.server.to(`user_${m.id}`).emit('incomingCall', callPayload);
+          }
+        });
+      }
+    }
   }
 
   @SubscribeMessage('answerCall')

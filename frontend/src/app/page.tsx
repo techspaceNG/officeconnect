@@ -26,6 +26,8 @@ import {
   VideoOff,
   PhoneOff,
   Check,
+  Minimize2,
+  Maximize2,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
@@ -113,6 +115,10 @@ export default function Home() {
     isIncoming: boolean;
   } | null>(null);
 
+  const [callStatus, setCallStatus] = useState<'calling' | 'ringing' | 'connected'>('calling');
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
+
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(false);
   const [showMeetingNotes, setShowMeetingNotes] = useState(false);
@@ -127,6 +133,27 @@ export default function Home() {
   const pendingCandidatesRef = useRef<RTCIceCandidate[]>([]);
   const ringtoneIntervalRef = useRef<any>(null);
 
+  // Live Call Duration Timer
+  useEffect(() => {
+    let timer: any = null;
+    if (globalCall?.isInCall && callStatus === 'connected') {
+      timer = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [globalCall?.isInCall, callStatus]);
+
+  const formatCallDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Message Notification Chime Generator (Web Audio API)
   const playMessageChime = () => {
     try {
@@ -136,7 +163,6 @@ export default function Home() {
 
       const ctx = new AudioCtx();
       
-      // Tone 1 (E5 - 659 Hz)
       const osc1 = ctx.createOscillator();
       const gain1 = ctx.createGain();
       osc1.type = 'sine';
@@ -148,7 +174,6 @@ export default function Home() {
       osc1.start();
       osc1.stop(ctx.currentTime + 0.2);
 
-      // Tone 2 (A5 - 880 Hz)
       setTimeout(() => {
         const osc2 = ctx.createOscillator();
         const gain2 = ctx.createGain();
@@ -218,7 +243,7 @@ export default function Home() {
         localVideoRef.current.srcObject = localStreamRef.current;
       }
     }
-  }, [globalCall?.isInCall]);
+  }, [globalCall?.isInCall, isCallMinimized]);
 
   // Mobile drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -319,7 +344,7 @@ export default function Home() {
       setAnnouncements(annList);
 
       setPendingLetters(lettersList.filter((l: any) => l.status === 'PENDING_APPROVAL'));
-      setRecentFiles(filesList.slice(0, 5));
+      setRecentFiles(filesList.files.slice(0, 5));
     } catch (e) {
       console.error('Error fetching dashboard stats:', e);
     }
@@ -354,7 +379,7 @@ export default function Home() {
     const handleNotification = (data: any) => {
       fetchDashboardData(user);
       if (data?.message && data.message.senderId !== user.id) {
-        playMessageChime(); // Audible chime sound on new message!
+        playMessageChime();
 
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const senderName = data.message.sender?.fullName || 'Colleague';
@@ -416,6 +441,7 @@ export default function Home() {
     const handleIncomingCall = (data: any) => {
       if (data.caller?.id !== user.id) {
         playRingtone();
+        setCallStatus('ringing');
 
         setGlobalCall({
           isInCall: false,
@@ -461,16 +487,14 @@ export default function Home() {
 
     const handleCallAccepted = async (data: any) => {
       stopRingtone();
+      setCallStatus('connected'); // Caller side transitions to connected!
       if (peerConnectionRef.current && data.answer) {
         try {
           await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
           
-          // Flush pending ICE candidates
           while (pendingCandidatesRef.current.length > 0) {
             const cand = pendingCandidatesRef.current.shift();
-            if (cand) {
-              await peerConnectionRef.current.addIceCandidate(cand);
-            }
+            if (cand) await peerConnectionRef.current.addIceCandidate(cand);
           }
         } catch (e) {
           console.error('Error applying call answer:', e);
@@ -564,7 +588,7 @@ export default function Home() {
   };
 
   // Caller Initiates Call
-  const startGlobalCall = async (channelId: number, type: 'audio' | 'video', isGroup: boolean = false) => {
+  const startGlobalCall = async (channelId: number, type: 'audio' | 'video', isGroup: boolean = false, recipientId?: number) => {
     try {
       pendingCandidatesRef.current = [];
       remoteStreamRef.current = new MediaStream();
@@ -610,8 +634,11 @@ export default function Home() {
         offer,
         callType: type,
         isGroup,
+        recipientId,
       });
 
+      setCallStatus('calling'); // Caller starts in 'calling' state!
+      setIsCallMinimized(false);
       setGlobalCall({
         isInCall: true,
         callType: type,
@@ -683,6 +710,7 @@ export default function Home() {
         answer,
       });
 
+      setCallStatus('connected'); // Recipient connected!
       setGlobalCall({
         ...globalCall,
         isInCall: true,
@@ -729,6 +757,8 @@ export default function Home() {
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
     setGlobalCall(null);
+    setCallStatus('calling');
+    setIsCallMinimized(false);
     setIsMicMuted(false);
     setIsCamOff(false);
     setShowMeetingNotes(false);
@@ -1352,7 +1382,31 @@ export default function Home() {
         </main>
       </div>
 
-      {/* --- GLOBAL INCOMING CALL RINGING MODAL (Works across all pages) --- */}
+      {/* --- FLOATING MINIMIZED CALL BAR PILL --- */}
+      {globalCall?.isInCall && isCallMinimized && (
+        <div
+          onClick={() => setIsCallMinimized(false)}
+          className="fixed bottom-6 right-6 z-50 apple-card px-4 py-3 shadow-2xl border border-primary/40 bg-background/95 backdrop-blur-2xl flex items-center gap-3.5 cursor-pointer hover:border-primary transition-all animate-in slide-in-from-bottom-4"
+        >
+          <div className="relative">
+            <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse block"></span>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-foreground">
+                {globalCall.callType === 'video' ? 'Video Meeting' : 'Audio Call'}
+              </span>
+              <span className="text-xs font-mono font-bold text-primary">
+                {callStatus === 'connected' ? formatCallDuration(callDuration) : callStatus.toUpperCase()}
+              </span>
+            </div>
+            <p className="text-[10px] text-muted-foreground font-medium">Tap to expand window</p>
+          </div>
+          <Maximize2 size={16} className="text-muted-foreground hover:text-foreground" />
+        </div>
+      )}
+
+      {/* --- GLOBAL INCOMING CALL RINGING MODAL --- */}
       {globalCall?.isIncoming && (
         <div className="fixed inset-0 bg-background/90 backdrop-blur-xl z-50 flex items-center justify-center p-4">
           <div className="apple-card max-w-sm w-full p-6 text-center space-y-6 border border-primary/30 shadow-2xl animate-in zoom-in-95 duration-200">
@@ -1392,28 +1446,50 @@ export default function Home() {
       )}
 
       {/* --- GLOBAL ACTIVE AUDIO/VIDEO MEETING OVERLAY --- */}
-      {globalCall?.isInCall && (
+      {globalCall?.isInCall && !isCallMinimized && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl z-50 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="p-4 flex items-center justify-between border-b border-white/10 text-white">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-xs font-bold tracking-wide">
-                {globalCall.callType === 'video' ? 'Live Video Meeting' : 'Live Audio Call'}
-              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold tracking-wide">
+                    {globalCall.callType === 'video' ? 'Live Video Meeting' : 'Live Audio Call'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-mono font-semibold text-emerald-400 border border-emerald-500/20">
+                    {callStatus === 'connected' ? formatCallDuration(callDuration) : callStatus.toUpperCase()}
+                  </span>
+                </div>
+                <p className="text-[10px] text-white/60">
+                  {callStatus === 'calling' && 'Calling colleague...'}
+                  {callStatus === 'ringing' && 'Ringing...'}
+                  {callStatus === 'connected' && `Connected (${formatCallDuration(callDuration)})`}
+                </p>
+              </div>
             </div>
 
-            <button
-              onClick={() => setShowMeetingNotes(!showMeetingNotes)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer ${
-                showMeetingNotes
-                  ? 'bg-white text-black border-white'
-                  : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
-              }`}
-            >
-              <FileText size={14} />
-              {showMeetingNotes ? 'Hide Minutes' : 'Take Meeting Minutes'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsCallMinimized(true)}
+                className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer"
+                title="Minimize Call Window"
+              >
+                <Minimize2 size={16} />
+              </button>
+
+              <button
+                onClick={() => setShowMeetingNotes(!showMeetingNotes)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                  showMeetingNotes
+                    ? 'bg-white text-black border-white'
+                    : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+                }`}
+              >
+                <FileText size={14} />
+                {showMeetingNotes ? 'Hide Minutes' : 'Take Meeting Minutes'}
+              </button>
+            </div>
           </div>
 
           {/* Main Call Viewport & Meeting Notes Side Panel */}
